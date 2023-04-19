@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright(c) 2022 Bruce
+ *
+ * Copyright (c) 2023 Xinyu Yang.
+ * Copyright (c) 2022 Bruce.
  */
-/*$FreeBSD$*/
 
 #ifndef _MQNIC_OSDEP_H_
 #define _MQNIC_OSDEP_H_
@@ -85,7 +86,6 @@ typedef int8_t		s8;
 
 #define MQNIC_PCI_CSR_REG_ADDR(priv, reg) \
 	((volatile uint32_t *)((char *)(priv)->csr_hw_addr + (reg)))
-
 
 #define MQNIC_PCI_REG_ARRAY_ADDR(hw, reg, index) \
 	MQNIC_PCI_REG_ADDR((hw), (reg) + ((index) << 2))

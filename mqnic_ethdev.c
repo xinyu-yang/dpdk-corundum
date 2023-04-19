@@ -1,34 +1,13 @@
 /* SPDX-License-Identifier: BSD-3-Clause
- * Copyright(c) 2022 Bruce
+ *
+ * Copyright (c) 2023 Xinyu Yang.
+ * Copyright (c) 2022 Bruce.
  */
 
-#include <sys/queue.h>
-#include <stdio.h>
-#include <errno.h>
-#include <stdint.h>
-#include <stdarg.h>
-
-#include <rte_string_fns.h>
-#include <rte_common.h>
-#include <rte_interrupts.h>
-#include <rte_byteorder.h>
-#include <rte_log.h>
-#include <rte_debug.h>
-#include <rte_pci.h>
-#include <rte_bus_pci.h>
-#include <rte_ether.h>
-#include <rte_ethdev_driver.h>
-#include <rte_ethdev_pci.h>
-#include <rte_memory.h>
-#include <rte_eal.h>
-#include <rte_malloc.h>
-#include <rte_dev.h>
-
-#include "mqnic_hw.h"
-#include "mqnic_logs.h"
-#include "mqnic_defines.h"
 #include "mqnic_ethdev.h"
-#include "mqnic_regs.h"
+#include "mqnic_logs.h"
+#include <asm-generic/errno-base.h>
+#include <time.h>
 
 /*
  * Default values for port configuration
@@ -805,7 +784,7 @@ mqnic_all_port_deactivate(struct rte_eth_dev *dev)
 }
 
 static void
-eth_mqnic_get_if_hw_info(struct rte_eth_dev *dev)
+eth_mqnic_get_if_hw_info(struct rte_eth_dev *dev, int index)
 {
 	struct mqnic_hw *hw =
 		MQNIC_DEV_PRIVATE_TO_HW(dev->data->dev_private);
@@ -873,36 +852,31 @@ static int32_t
 mqnic_get_basic_info_from_hw(struct mqnic_hw *hw)
 {
     // Read ID registers
-    hw->fw_id = MQNIC_READ_REG(hw, MQNIC_REG_FW_ID);
+    hw->fpga_id = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_FPGA_ID);
+    PMD_INIT_LOG(DEBUG, "FPGA ID: 0x%08x", hw->fpga_id);
+    hw->fw_id = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_FW_ID);
     PMD_INIT_LOG(DEBUG, "FW ID: 0x%08x", hw->fw_id);
 	if (hw->fw_id == 0xffffffff){
 		PMD_INIT_LOG(ERR, "Deivce needs to be reset");
 		return MQNIC_ERR_RESET;
 	}
 
-    hw->fw_ver = MQNIC_READ_REG(hw, MQNIC_REG_FW_VER);
-    PMD_INIT_LOG(DEBUG, "FW version: %d.%d", hw->fw_ver >> 16, hw->fw_ver & 0xffff);
-    hw->board_id = MQNIC_READ_REG(hw, MQNIC_REG_BOARD_ID);
+    hw->fw_ver = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_FW_VER);
+    PMD_INIT_LOG(DEBUG, "FW version: %d.%d.%d.%d", hw->fw_ver >> 24, (hw->fw_ver >> 16) & 0xff,
+		(hw->fw_ver >> 8) & 0xff, hw->fw_ver & 0xff);
+    hw->board_id = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_BOARD_ID);
     PMD_INIT_LOG(DEBUG, "Board ID: 0x%08x", hw->board_id);
-    hw->board_ver = MQNIC_READ_REG(hw, MQNIC_REG_BOARD_VER);
-    PMD_INIT_LOG(DEBUG, "Board version: %d.%d", hw->board_ver >> 16, hw->board_ver & 0xffff);
-
-    hw->if_count = MQNIC_READ_REG(hw, MQNIC_REG_IF_COUNT);
-    PMD_INIT_LOG(DEBUG, "IF count: %d", hw->if_count);
-    hw->if_stride = MQNIC_READ_REG(hw, MQNIC_REG_IF_STRIDE);
-    PMD_INIT_LOG(DEBUG, "IF stride: 0x%08x", hw->if_stride);
-    hw->if_csr_offset = MQNIC_READ_REG(hw, MQNIC_REG_IF_CSR_OFFSET);
-    PMD_INIT_LOG(DEBUG, "IF CSR offset: 0x%08x", hw->if_csr_offset);
-
-	// check BAR size
-    if (hw->if_count*hw->if_stride > hw->hw_regs_size)
-    {
-        PMD_INIT_LOG(ERR, "Invalid BAR configuration (%d IF * 0x%x > 0x%lx)", hw->if_count, hw->if_stride, hw->hw_regs_size);
-		return MQNIC_ERR_CONFIG;
-    }
-
-	if (hw->if_count > MQNIC_MAX_IF)
-        hw->if_count = MQNIC_MAX_IF;
+    hw->board_ver = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_BOARD_VER);
+    PMD_INIT_LOG(DEBUG, "Board version: %d.%d.%d.%d", hw->board_ver >> 24,
+		(hw->board_ver >> 16) & 0xff,
+		(hw->board_ver >> 8) & 0xff,
+		hw->board_ver & 0xff);
+    hw->build_date = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_BUILD_DATE);
+    PMD_INIT_LOG(DEBUG, "Build date: %s (raw: %d)", asctime(localtime((time_t *)&(hw->build_date))), hw->build_date);
+    hw->git_hash = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_GIT_HASH);
+    PMD_INIT_LOG(DEBUG, "Git hash: %08x", hw->git_hash);
+    hw->rel_info = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_REL_INFO);
+    PMD_INIT_LOG(DEBUG, "Release info: %08x", hw->rel_info);
 
 	return MQNIC_SUCCESS;
 }
@@ -937,6 +911,7 @@ static int
 eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 {
 	int error = 0;
+	struct mqnic_reg_block *rb;
 	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(eth_dev);
 	struct mqnic_hw *hw =
 		MQNIC_DEV_PRIVATE_TO_HW(eth_dev->data->dev_private);
@@ -962,14 +937,72 @@ eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 	hw->hw_addr = (void *)pci_dev->mem_resource[0].addr;
 	hw->hw_regs_size = pci_dev->mem_resource[0].len;
 
-	mqnic_identify_hardware(eth_dev, pci_dev);
-	if (mqnic_get_basic_info_from_hw(hw) != MQNIC_SUCCESS) {
-		error = -EIO;
-		goto err_late;
+	// Enumerate registers
+	hw->rb_list = mqnic_enumerate_reg_block_list(hw, 0, hw->hw_regs_size);
+	if (!hw->rb_list) {
+	    PMD_INIT_LOG(ERR, "Failed to enumerate blocks");
+	    error = -EIO;
+	    goto err_late;
 	}
 
-	hw->hw_addr = hw->hw_addr + 0*hw->if_stride;  //use interface 0
-	eth_mqnic_get_if_hw_info(eth_dev);
+	PMD_INIT_LOG(INFO, "Device-level register blocks:");
+	for (rb = mqnic->rb_list; rb->regs; rb++) {
+	    PMD_INIT_LOG(INFO, "\ttype 0x%08x (v %d.%d.%d.%d)", rb->type, rb->version >> 24,
+		    (rb->version >> 16) & 0xff, (rb->version >> 8) & 0xff, rb->version & 0xff);
+	}
+
+	mqnic_identify_hardware(eth_dev, pci_dev);
+
+	// Read ID registers
+	hw->fw_id_rb = mqnic_find_reg_block(hw->rb_list, MQNIC_RB_FW_ID_TYPE, MQNIC_RB_FW_ID_VER, 0);
+	if (!hw->fw_id_rb) {
+		error = -EIO;
+		PMD_INIT_LOG(ERR, "Error: FW ID block not found");
+		goto fail_rb_init;
+	}
+
+	// Check basic info
+	if (mqnic_get_basic_info_from_hw(hw) != MQNIC_SUCCESS) {
+		error = -EIO;
+		goto fail_basic_info;
+	}
+
+	// Read interface registers
+	hw->if_rb = mqnic_find_reg_block(hw->rb_list, MQNIC_RB_IF_TYPE, MQNIC_RB_IF_VER, 0);
+	if (!hw->if_rb) {
+		error = -EIO;
+		PMD_INIT_LOG(ERR, "Error: Interface block not found");
+		goto fail_if_rb;
+	}
+
+	hw->if_offset = MQNIC_DIRECT_READ_REG(hw->if_rb, MQNIC_RB_IF_REG_OFFSET);
+	hw->if_count = MQNIC_DIRECT_READ_REG(hw->if_rb, MQNIC_RB_IF_REG_COUNT);
+	hw->if_stride = MQNIC_DIRECT_READ_REG(hw->if_rb, MQNIC_RB_IF_REG_STRIDE);
+	hw->if_csr_offset = MQNIC_DIRECT_READ_REG(hw->if_rb, MQNIC_RB_IF_REG_CSR_OFFSET);
+	if (hw->if_count > MQNIC_MAX_IF)
+		hw->if_count = MQNIC_MAX_IF;
+
+	PMD_INIT_LOG(INFO, "IF offset: 0x%08x", hw->if_offset);
+	PMD_INIT_LOG(INFO, "IF count: %d", hw->if_count);
+	PMD_INIT_LOG(INFO, "IF stride: 0x%08x", hw->if_stride);
+	PMD_INIT_LOG(INFO, "IF CSR offset: 0x%08x", hw->if_csr_offset);
+
+	// check BAR size
+	if (hw->if_count * hw->if_stride > hw->hw_regs_size) {
+		error = -EIO;
+		PMD_INIT_LOG(ERR, "Invalid BAR configuration (%d IF * 0x%x > 0x%llx)",
+				hw->if_count, hw->if_stride, hw->hw_regs_size);
+		goto fail_bar_size;
+	}
+
+	for (int i = 0; i < hw->if_count; i++) {
+		PMD_INIT_LOG(INFO, "Creating interface %d", i);
+		error = eth_mqnic_get_if_hw_info(eth_dev, i);
+		if (error) {
+			PMD_INIT_LOG(ERR, "Failed to create interface %d", i);
+		}
+	}
+
 	mqnic_determine_desc_block_size(eth_dev);
 
 	mqnic_all_event_queue_create(eth_dev, 0);
@@ -1006,6 +1039,12 @@ eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 		     pci_dev->id.device_id);
 
 	return 0;
+
+fail_bar_size:
+fail_if_rb:
+fail_basic_info:
+fail_rb_init:
+	mqnic_free_reg_block_list(hw->rb_list);
 
 err_late:
 	return error;
