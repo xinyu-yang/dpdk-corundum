@@ -5,6 +5,7 @@
  */
 
 #include "mqnic_ethdev.h"
+#include "mqnic_hw.h"
 #include "mqnic_logs.h"
 #include <asm-generic/errno-base.h>
 #include <time.h>
@@ -106,6 +107,36 @@ static const struct eth_dev_ops eth_mqnic_ops = {
 	.rxq_info_get         = mqnic_rxq_info_get,
 	.txq_info_get         = mqnic_txq_info_get,
 };
+
+static void mqnic_interface_set_rx_queue_map_offset(struct mqnic_if *interface, int port, u32 val)
+{
+	MQNIC_DIRECT_WRITE_REG(interface->rx_queue_map_rb->regs, MQNIC_RB_RX_QUEUE_MAP_CH_OFFSET +
+			MQNIC_RB_RX_QUEUE_MAP_CH_STRIDE*port + MQNIC_RB_RX_QUEUE_MAP_CH_REG_OFFSET, val);
+}
+
+static u32 mqnic_interface_get_rx_queue_map_rss_mask(struct mqnic_if *interface, int port)
+{
+	return MQNIC_DIRECT_READ_REG(interface->rx_queue_map_rb->regs, MQNIC_RB_RX_QUEUE_MAP_CH_OFFSET +
+			MQNIC_RB_RX_QUEUE_MAP_CH_STRIDE*port + MQNIC_RB_RX_QUEUE_MAP_CH_REG_RSS_MASK);
+}
+
+static void mqnic_interface_set_rx_queue_map_rss_mask(struct mqnic_if *interface, int port, u32 val)
+{
+	MQNIC_DIRECT_WRITE_REG(interface->rx_queue_map_rb->regs, MQNIC_RB_RX_QUEUE_MAP_CH_OFFSET +
+			MQNIC_RB_RX_QUEUE_MAP_CH_STRIDE*port + MQNIC_RB_RX_QUEUE_MAP_CH_REG_RSS_MASK, val);
+}
+
+static u32 mqnic_interface_get_rx_queue_map_app_mask(struct mqnic_if *interface, int port)
+{
+	return MQNIC_DIRECT_READ_REG(interface->rx_queue_map_rb->regs, MQNIC_RB_RX_QUEUE_MAP_CH_OFFSET +
+			MQNIC_RB_RX_QUEUE_MAP_CH_STRIDE*port + MQNIC_RB_RX_QUEUE_MAP_CH_REG_APP_MASK);
+}
+
+static void mqnic_interface_set_rx_queue_map_app_mask(struct mqnic_if *interface, int port, u32 val)
+{
+	MQNIC_DIRECT_WRITE_REG(interface->rx_queue_map_rb->regs, MQNIC_RB_RX_QUEUE_MAP_CH_OFFSET +
+			MQNIC_RB_RX_QUEUE_MAP_CH_STRIDE*port + MQNIC_RB_RX_QUEUE_MAP_CH_REG_APP_MASK, val);
+}
 
 static void
 mqnic_event_queue_release(struct mqnic_eq_ring *ring)
@@ -624,21 +655,23 @@ mqnic_rx_cpl_queue_deactivate(struct rte_eth_dev *dev)
 	return;
 }
 
-static void
-mqnic_determine_desc_block_size(struct rte_eth_dev *dev)
+static u32
+mqnic_determine_desc_block_size(struct mqnic_if *interface)
 {
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	u32 desc_block_size = 0;
+	MQNIC_DIRECT_WRITE_REG(interface->hw_addr,
+		interface->tx_queue_offset + MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0xf << 8);
+	interface->max_desc_block_size = 1 << ((MQNIC_DIRECT_READ_REG(interface->hw_addr,
+		interface->tx_queue_offset + MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG) >> 8) & 0xf);
+	MQNIC_DIRECT_WRITE_REG(interface->hw_addr,
+		interface->tx_queue_offset + MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
 
-	MQNIC_DIRECT_WRITE_REG(priv->hw_addr, priv->tx_queue_offset+MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0xf << 8);
-	priv->max_desc_block_size = 1 << ((MQNIC_DIRECT_READ_REG(priv->hw_addr, priv->tx_queue_offset+MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG) >> 8) & 0xf);
-	MQNIC_DIRECT_WRITE_REG(priv->hw_addr, priv->tx_queue_offset+MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
+	PMD_INIT_LOG(INFO, "Max desc block size: %d", interface->max_desc_block_size);
 
-    PMD_INIT_LOG(INFO, "Max desc block size: %d", priv->max_desc_block_size);
+	interface->max_desc_block_size = interface->max_desc_block_size < MQNIC_MAX_FRAGS ? interface->max_desc_block_size : MQNIC_MAX_FRAGS;
 
-    priv->max_desc_block_size = priv->max_desc_block_size < MQNIC_MAX_FRAGS ? priv->max_desc_block_size : MQNIC_MAX_FRAGS;
-
-    priv->desc_block_size = priv->max_desc_block_size < 4 ? priv->max_desc_block_size : 4;
+	desc_block_size = interface->max_desc_block_size < 4 ? interface->max_desc_block_size : 4;
+	return desc_block_size;
 }
 
 static void mqnic_port_set_rss_mask(struct mqnic_port *port, u32 rss_mask)
@@ -765,8 +798,8 @@ mqnic_all_port_disable(struct rte_eth_dev *dev)
 static void
 mqnic_all_port_deactivate(struct rte_eth_dev *dev)
 {
-	struct mqnic_port *port;
 	uint32_t i;
+	struct mqnic_port *port;
 	struct mqnic_priv *priv =
 		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
 
@@ -783,13 +816,198 @@ mqnic_all_port_deactivate(struct rte_eth_dev *dev)
 	return;
 }
 
+static int mqnic_create_if(struct mqnic_hw *hw, int idx) {
+	int ret = 0;
+	u32 i = 0;
+	u32 desc_block_size;
+	struct mqnic_if *interface;
+	struct mqnic_reg_block *rb;
+
+	interface = rte_zmalloc("mqnic interface", sizeof(struct mqnic_if), 0);
+	if (!interface)
+		return -ENOMEM;
+
+	interface->index = idx;
+	interface->hw_regs_size = hw->if_stride;
+	interface->hw_addr = hw->hw_addr + hw->if_offset + idx * hw->if_stride;
+	interface->csr_hw_addr = interface->hw_addr + hw->if_csr_offset;
+
+	// Enumerate registers
+	interface->rb_list = mqnic_enumerate_reg_block_list(interface->hw_addr, hw->if_csr_offset, interface->hw_regs_size);
+	if (!interface->rb_list) {
+		ret = -EIO;
+		PMD_INIT_LOG(ERR, "Failed to enumerate blocks from 0x%p", interface->hw_addr);
+		goto fail;
+	}
+	PMD_INIT_LOG(INFO, "Interface-level register blocks:");
+	for (rb = interface->rb_list; rb->regs; rb++)
+		PMD_INIT_LOG(INFO, "\ttype 0x%08x (v %d.%d.%d.%d)", rb->type, rb->version >> 24,
+				(rb->version >> 16) & 0xff, (rb->version >> 8) & 0xff, rb->version & 0xff);
+	
+	// Read interface features
+	interface->if_ctrl_rb = mqnic_find_reg_block(interface->rb_list, MQNIC_RB_IF_CTRL_TYPE, MQNIC_RB_IF_CTRL_VER, 0);
+	if (!interface->if_ctrl_rb) {
+		ret = -EIO;
+		PMD_INIT_LOG(ERR, "Interface control block not found");
+		goto fail;
+	}
+
+	interface->if_features = MQNIC_DIRECT_READ_REG(interface->if_ctrl_rb->regs, MQNIC_RB_IF_CTRL_REG_FEATURES);
+	interface->port_count = MQNIC_DIRECT_READ_REG(interface->if_ctrl_rb->regs, MQNIC_RB_IF_CTRL_REG_PORT_COUNT);
+	interface->sched_block_count = MQNIC_DIRECT_READ_REG(interface->if_ctrl_rb->regs, MQNIC_RB_IF_CTRL_REG_SCHED_COUNT);
+	interface->max_tx_mtu = MQNIC_DIRECT_READ_REG(interface->if_ctrl_rb->regs, MQNIC_RB_IF_CTRL_REG_MAX_TX_MTU);
+	interface->max_rx_mtu = MQNIC_DIRECT_READ_REG(interface->if_ctrl_rb->regs, MQNIC_RB_IF_CTRL_REG_MAX_RX_MTU);
+
+	PMD_INIT_LOG(INFO, "IF features: 0x%08x", interface->if_features);
+	PMD_INIT_LOG(INFO, "Port count: %d", interface->port_count);
+	PMD_INIT_LOG(INFO, "Scheduler block count: %d", interface->sched_block_count);
+	PMD_INIT_LOG(INFO, "Max TX MTU: %d", interface->max_tx_mtu);
+	PMD_INIT_LOG(INFO, "Max RX MTU: %d", interface->max_rx_mtu);
+
+	// Read event queue
+	interface->event_queue_rb = mqnic_find_reg_block(interface->rb_list, MQNIC_RB_EVENT_QM_TYPE, MQNIC_RB_EVENT_QM_VER, 0);
+	if (!interface->event_queue_rb) {
+		ret = -EIO;
+		PMD_INIT_LOG(ERR, "Event queue block not found");
+		goto fail;
+	}
+
+	interface->event_queue_count = MQNIC_DIRECT_READ_REG(interface->event_queue_rb->regs, MQNIC_RB_EVENT_QM_REG_COUNT);
+	interface->event_queue_offset = MQNIC_DIRECT_READ_REG(interface->event_queue_rb->regs, MQNIC_RB_EVENT_QM_REG_OFFSET);
+	interface->event_queue_stride = MQNIC_DIRECT_READ_REG(interface->event_queue_rb->regs, MQNIC_RB_EVENT_QM_REG_STRIDE);
+
+	PMD_INIT_LOG(INFO, "Event queue offset: 0x%08x", interface->event_queue_offset);
+	PMD_INIT_LOG(INFO, "Event queue count: %d", interface->event_queue_count);
+	PMD_INIT_LOG(INFO, "Event queue stride: 0x%08x", interface->event_queue_stride);
+
+	if (interface->event_queue_count > MQNIC_MAX_EVENT_RINGS)
+		interface->event_queue_count = MQNIC_MAX_EVENT_RINGS;
+
+	// Read transmit queue
+	interface->tx_queue_rb = mqnic_find_reg_block(interface->rb_list, MQNIC_RB_TX_QM_TYPE, MQNIC_RB_TX_QM_VER, 0);
+	if (!interface->tx_queue_rb) {
+		ret = -EIO;
+		PMD_INIT_LOG(ERR, "Transmit queue block not found");
+		goto fail;
+	}
+
+	interface->tx_queue_offset = MQNIC_DIRECT_READ_REG(interface->tx_queue_rb->regs, MQNIC_RB_TX_QM_REG_OFFSET);
+	interface->tx_queue_count = MQNIC_DIRECT_READ_REG(interface->tx_queue_rb->regs, MQNIC_RB_TX_QM_REG_COUNT);
+	interface->tx_queue_stride = MQNIC_DIRECT_READ_REG(interface->tx_queue_rb->regs, MQNIC_RB_TX_QM_REG_STRIDE);
+
+	PMD_INIT_LOG(INFO, "TX queue offset: 0x%08x", interface->tx_queue_offset);
+	PMD_INIT_LOG(INFO, "TX queue count: %d", interface->tx_queue_count);
+	PMD_INIT_LOG(INFO, "TX queue stride: 0x%08x", interface->tx_queue_stride);
+
+	if (interface->tx_queue_count > MQNIC_MAX_TX_RINGS)
+		interface->tx_queue_count = MQNIC_MAX_TX_RINGS;
+
+	// Read transmit completion queue
+	interface->tx_cpl_queue_rb = mqnic_find_reg_block(interface->rb_list, MQNIC_RB_TX_CQM_TYPE, MQNIC_RB_TX_CQM_VER, 0);
+	if (!interface->tx_cpl_queue_rb) {
+		ret = -EIO;
+		PMD_INIT_LOG(ERR, "TX completion queue block not found");
+		goto fail;
+	}
+
+	interface->tx_cpl_queue_offset = MQNIC_DIRECT_READ_REG(interface->tx_cpl_queue_rb->regs,
+			MQNIC_RB_TX_CQM_REG_OFFSET);
+	interface->tx_cpl_queue_count = MQNIC_DIRECT_READ_REG(interface->tx_cpl_queue_rb->regs,
+			MQNIC_RB_TX_CQM_REG_COUNT);
+	interface->tx_cpl_queue_stride = MQNIC_DIRECT_READ_REG(interface->tx_cpl_queue_rb->regs,
+			MQNIC_RB_TX_CQM_REG_STRIDE);
+
+	PMD_INIT_LOG(INFO, "TX completion queue offset: 0x%08x", interface->tx_cpl_queue_offset);
+	PMD_INIT_LOG(INFO, "TX completion queue count: %d", interface->tx_cpl_queue_count);
+	PMD_INIT_LOG(INFO, "TX completion queue stride: 0x%08x", interface->tx_cpl_queue_stride);
+
+	if (interface->tx_cpl_queue_count > MQNIC_MAX_TX_CPL_RINGS)
+		interface->tx_cpl_queue_count = MQNIC_MAX_TX_CPL_RINGS;
+
+	// Read receive queue
+	interface->rx_queue_rb = mqnic_find_reg_block(interface->rb_list, MQNIC_RB_RX_QM_TYPE,
+			MQNIC_RB_RX_QM_VER, 0);
+	if (!interface->rx_queue_rb) {
+		ret = -EIO;
+		PMD_INIT_LOG(ERR, "Transmit queue block not found");
+		goto fail;
+	}
+
+	interface->rx_queue_offset = MQNIC_DIRECT_READ_REG(interface->rx_queue_rb->regs,
+			MQNIC_RB_RX_QM_REG_OFFSET);
+	interface->rx_queue_count = MQNIC_DIRECT_READ_REG(interface->rx_queue_rb->regs,
+			MQNIC_RB_RX_QM_REG_COUNT);
+	interface->rx_queue_stride = MQNIC_DIRECT_READ_REG(interface->rx_queue_rb->regs,
+			MQNIC_RB_RX_QM_REG_STRIDE);
+
+	PMD_INIT_LOG(INFO, "RX queue offset: 0x%08x", interface->rx_queue_offset);
+	PMD_INIT_LOG(INFO, "RX queue count: %d", interface->rx_queue_count);
+	PMD_INIT_LOG(INFO, "RX queue stride: 0x%08x", interface->rx_queue_stride);
+
+	if (interface->rx_queue_count > MQNIC_MAX_RX_RINGS)
+		interface->rx_queue_count = MQNIC_MAX_RX_RINGS;
+
+	// Read receive completion queue
+	interface->rx_cpl_queue_rb = mqnic_find_reg_block(interface->rb_list, MQNIC_RB_RX_CQM_TYPE, MQNIC_RB_RX_CQM_VER, 0);
+	if (!interface->rx_cpl_queue_rb) {
+		ret = -EIO;
+		PMD_INIT_LOG(ERR, "RX completion queue block not found");
+		goto fail;
+	}
+
+	interface->rx_cpl_queue_offset = MQNIC_DIRECT_READ_REG(interface->rx_cpl_queue_rb->regs, MQNIC_RB_RX_CQM_REG_OFFSET);
+	interface->rx_cpl_queue_count = MQNIC_DIRECT_READ_REG(interface->rx_cpl_queue_rb->regs, MQNIC_RB_RX_CQM_REG_COUNT);
+	interface->rx_cpl_queue_stride = MQNIC_DIRECT_READ_REG(interface->rx_cpl_queue_rb->regs, MQNIC_RB_RX_CQM_REG_STRIDE);
+
+	PMD_INIT_LOG(INFO, "RX completion queue offset: 0x%08x", interface->rx_cpl_queue_offset);
+	PMD_INIT_LOG(INFO, "RX completion queue count: %d", interface->rx_cpl_queue_count);
+	PMD_INIT_LOG(INFO, "RX completion queue stride: 0x%08x", interface->rx_cpl_queue_stride);
+
+	if (interface->rx_cpl_queue_count > MQNIC_MAX_RX_CPL_RINGS)
+		interface->rx_cpl_queue_count = MQNIC_MAX_RX_CPL_RINGS;
+
+	// Read receive queue map
+	interface->rx_queue_map_rb = mqnic_find_reg_block(interface->rb_list, MQNIC_RB_RX_QUEUE_MAP_TYPE, MQNIC_RB_RX_QUEUE_MAP_VER, 0);
+
+	if (!interface->rx_queue_map_rb) {
+		ret = -EIO;
+		PMD_INIT_LOG(ERR, "RX queue map block not found");
+		goto fail;
+	}
+
+	for (i = 0; i < interface->port_count; i++) {
+		mqnic_interface_set_rx_queue_map_offset(interface, i, 0);
+		mqnic_interface_set_rx_queue_map_rss_mask(interface, i, 0);
+		mqnic_interface_set_rx_queue_map_app_mask(interface, i, 0);
+	}
+
+	// Determine description block size
+	desc_block_size = mqnic_determine_desc_block_size(interface);
+
+	// Create rings
+	
+
+
+
+	// Create ports
+	
+
+
+	hw->interface[idx] = interface;
+
+fail:
+	mqnic_free_reg_block_list(interface->rb_list);
+	return ret;
+}
+
 static void
-eth_mqnic_get_if_hw_info(struct rte_eth_dev *dev, int index)
+eth_mqnic_get_if_hw_info(struct rte_eth_dev *dev)
 {
 	struct mqnic_hw *hw =
 		MQNIC_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 	struct mqnic_priv *priv =
 		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	/*u8 *if_addr = hw->hw_addr + idx * hw->if_stride;*/
 
 	memset(priv, 0, sizeof(struct mqnic_priv));
 	
@@ -938,7 +1156,7 @@ eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 	hw->hw_regs_size = pci_dev->mem_resource[0].len;
 
 	// Enumerate registers
-	hw->rb_list = mqnic_enumerate_reg_block_list(hw, 0, hw->hw_regs_size);
+	hw->rb_list = mqnic_enumerate_reg_block_list(hw->hw_addr, 0, hw->hw_regs_size);
 	if (!hw->rb_list) {
 	    PMD_INIT_LOG(ERR, "Failed to enumerate blocks");
 	    error = -EIO;
@@ -997,13 +1215,14 @@ eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 
 	for (int i = 0; i < hw->if_count; i++) {
 		PMD_INIT_LOG(INFO, "Creating interface %d", i);
-		error = eth_mqnic_get_if_hw_info(eth_dev, i);
+		/*error = eth_mqnic_get_if_hw_info(eth_dev);*/
+		error = mqnic_create_if(hw, i);
 		if (error) {
 			PMD_INIT_LOG(ERR, "Failed to create interface %d", i);
+			goto fail_create_if;
 		}
 	}
 
-	mqnic_determine_desc_block_size(eth_dev);
 
 	mqnic_all_event_queue_create(eth_dev, 0);
 	mqnic_tx_cpl_queue_create(eth_dev, 0);
@@ -1040,6 +1259,7 @@ eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 
 	return 0;
 
+fail_create_if:
 fail_bar_size:
 fail_if_rb:
 fail_basic_info:

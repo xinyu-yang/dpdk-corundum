@@ -616,7 +616,7 @@ struct mqnic_reg_block {
 /*
  * Register block manipulations
  */
-struct mqnic_reg_block *mqnic_enumerate_reg_block_list(struct mqnic_hw*, size_t offset, size_t size);
+struct mqnic_reg_block *mqnic_enumerate_reg_block_list(u8 *addr, size_t offset, size_t size);
 struct mqnic_reg_block *mqnic_find_reg_block(struct mqnic_reg_block *list, u32 type, u32 version, int index);
 void mqnic_free_reg_block_list(struct mqnic_reg_block *list);
 

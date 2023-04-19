@@ -13,7 +13,7 @@
 #define __le64 u64
 
 
-#define MQNIC_MAX_IF 1//8
+#define MQNIC_MAX_IF	8
 #define MQNIC_MAX_PORTS 8
 #define MQNIC_MAX_SCHED 8
 

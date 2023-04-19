@@ -7,7 +7,7 @@
 
 #include "mqnic_ethdev.h"
 
-struct mqnic_reg_block *mqnic_enumerate_reg_block_list(struct mqnic_hw *hw, size_t offset, size_t size)
+struct mqnic_reg_block *mqnic_enumerate_reg_block_list(u8 *addr, size_t offset, size_t size)
 {
 	int max_count = 8;
 	struct mqnic_reg_block *reg_block_list = rte_malloc("mqnic register block", max_count * sizeof(struct mqnic_reg_block), 0);
@@ -31,24 +31,24 @@ struct mqnic_reg_block *mqnic_enumerate_reg_block_list(struct mqnic_hw *hw, size
 		if ((offset == 0 && count != 0) || offset >= size)
 			break;
 
-		ptr = hw->hw_addr + offset;
+		ptr = addr + offset;
 
 		for (k = 0; k < count; k++)
 		{
 			if (ptr == reg_block_list[k].regs)
 			{
-				pr_err("Register blocks form a loop");
+				PMD_INIT_LOG(ERR, "Register blocks form a loop");
 				goto fail;
 			}
 		}
 
-		rb_type = MQNIC_READ_REG(hw, MQNIC_RB_REG_TYPE);
-		rb_version = MQNIC_READ_REG(hw, MQNIC_RB_REG_VER);
-		offset = MQNIC_READ_REG(hw, MQNIC_RB_REG_NEXT_PTR);
+		rb_type = MQNIC_DIRECT_READ_REG(ptr, MQNIC_RB_REG_TYPE);
+		rb_version = MQNIC_DIRECT_READ_REG(ptr, MQNIC_RB_REG_VER);
+		offset = MQNIC_DIRECT_READ_REG(ptr, MQNIC_RB_REG_NEXT_PTR);
 
 		reg_block_list[count].type = rb_type;
 		reg_block_list[count].version = rb_version;
-		reg_block_list[count].base = hw->hw_addr;
+		reg_block_list[count].base = addr;
 		reg_block_list[count].regs = ptr;
 
 		count++;
