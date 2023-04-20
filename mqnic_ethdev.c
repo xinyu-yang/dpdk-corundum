@@ -4,11 +4,7 @@
  * Copyright (c) 2022 Bruce.
  */
 
-#include "mqnic_ethdev.h"
-#include "mqnic_hw.h"
-#include "mqnic_logs.h"
-#include <asm-generic/errno-base.h>
-#include <time.h>
+#include "mqnic.h"
 
 /*
  * Default values for port configuration
@@ -985,6 +981,11 @@ static int mqnic_create_if(struct mqnic_hw *hw, int idx) {
 	desc_block_size = mqnic_determine_desc_block_size(interface);
 
 	// Create rings
+	mqnic_all_event_queue_create(eth_dev, 0);
+	mqnic_tx_cpl_queue_create(eth_dev, 0);
+	mqnic_rx_cpl_queue_create(eth_dev, 0);
+	mqnic_all_port_setup(eth_dev);
+
 	
 
 
@@ -1223,11 +1224,6 @@ eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 		}
 	}
 
-
-	mqnic_all_event_queue_create(eth_dev, 0);
-	mqnic_tx_cpl_queue_create(eth_dev, 0);
-	mqnic_rx_cpl_queue_create(eth_dev, 0);
-	mqnic_all_port_setup(eth_dev);
 
 	/* Read the permanent MAC address out of the EEPROM */
 	if (mqnic_read_mac_addr(hw) != 0) {
