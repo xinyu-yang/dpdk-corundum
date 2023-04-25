@@ -5,8 +5,10 @@
  */
 
 #include "mqnic.h"
+#include <infiniband/verbs.h>
 
 uint32_t event_queue_size = 1024;   //number of event queue
+uint32_t cpl_queue_size = 1024;   //number of event queue
 
 /*
  * Default values for port configuration
@@ -327,6 +329,46 @@ mqnic_all_event_queue_active(struct rte_eth_dev *dev)
 	return 0;
 }
 
+
+static void _create_cpl_queue(struct mqnic_cq_ring *ring, struct mqnic_if *interface, int i) {
+	ring->interface = interface;
+	ring->index = i;
+	ring->active = 0;
+
+	ring->hw_addr = interface->hw_addr + interface->tx_cpl_queue_offset
+		+ i * interface->tx_cpl_queue_stride;
+	ring->hw_ptr_mask = 0xffff;
+	ring->hw_head_ptr = ring->hw_addr + MQNIC_CPL_QUEUE_HEAD_PTR_REG;
+	ring->hw_tail_ptr = ring->hw_addr + MQNIC_CPL_QUEUE_TAIL_PTR_REG;
+
+	ring->head_ptr = 0;
+	ring->tail_ptr = 0;
+
+	PMD_INIT_LOG(DEBUG, "ring->buf=%p ring->hw_addr=%p ring->buf_dma_addr=0x%"PRIx64,
+	     ring->buf, ring->hw_addr, ring->buf_dma_addr);
+}
+
+static int _alloc_cpl_queue(struct mqnic_cq_ring *ring, struct rte_eth_dev *dev, int i, int socket_id) {
+	const struct rte_memzone *tz;
+	ring->size = roundup_pow_of_two(cpl_queue_size);
+	ring->size_mask = ring->size - 1;
+	ring->stride = roundup_pow_of_two(MQNIC_CPL_SIZE);
+
+	ring->buf_size = ring->size * ring->stride;
+	tz = rte_eth_dma_zone_reserve(dev, "cq_ring", i, ring->buf_size,
+			      MQNIC_ALIGN, socket_id);
+	if (tz == NULL) {
+		PMD_INIT_LOG(ERR, "failed to alloc cq ring buffer, i = %d, buf_size = 0x%lx, size = 0x%x, stride = 0x%x", i, ring->buf_size, ring->size, ring->stride);
+		rte_free(ring);
+		return -ENOMEM;
+	}
+
+	ring->buf = (u8*)tz->addr;
+	ring->buf_dma_addr = tz->iova;
+
+	return 0;
+}
+
 void mqnic_arm_cq(struct mqnic_cq_ring *ring)
 {
 	MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, ring->eq_index | MQNIC_CPL_QUEUE_ARM_MASK);
@@ -405,17 +447,17 @@ mqnic_rx_cpl_queue_active(struct rte_eth_dev *dev)
 }
 
 
-static void 
+static void
 mqnic_init_cpl_queue_registers(struct mqnic_cq_ring *ring)
 {
 	// deactivate queue
 	MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
-    // set base address
+	// set base address
 	MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_BASE_ADDR_REG+0, ring->buf_dma_addr);
 	MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_BASE_ADDR_REG+4, ring->buf_dma_addr >> 32);
-    // set interrupt index
-    MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, 0);
-    // set pointers
+	// set interrupt index
+	MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, 0);
+	// set pointers
 	MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_HEAD_PTR_REG, ring->head_ptr & ring->hw_ptr_mask);
 	MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_TAIL_PTR_REG, ring->tail_ptr & ring->hw_ptr_mask);
 	// set size
@@ -423,26 +465,24 @@ mqnic_init_cpl_queue_registers(struct mqnic_cq_ring *ring)
 }
 
 static int
-mqnic_tx_cpl_queue_create(struct rte_eth_dev *dev, int socket_id)
+mqnic_tx_cpl_queue_create(struct mqnic_if *interface, int socket_id)
 {
-	const struct rte_memzone *tz;
 	struct mqnic_cq_ring *ring;
-	uint32_t cpl_queue_size = 512;   //number of event queue
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct mqnic_hw *hw = interface->hw;
+	struct rte_eth_dev *dev = hw->dev;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_tx_cpl_queue_create");
 
-	for (i = 0; i < priv->tx_cpl_queue_count; i++){
-
-		if (priv->tx_cpl_ring[i] != NULL) {
+	for (i = 0; i < interface->tx_cpl_queue_count; i++){
+		// Release existing buffers if have
+		if (interface->tx_cpl_ring[i] != NULL) {
 			PMD_INIT_LOG(DEBUG, "release tx cpl ring %d", i);
-			mqnic_cpl_queue_release(priv->tx_cpl_ring[i]);
-			priv->tx_cpl_ring[i] = NULL;
+			mqnic_cpl_queue_release(interface->tx_cpl_ring[i]);
+			interface->tx_cpl_ring[i] = NULL;
 		}
 
-		/* allocate the event queue data structure */
+		/* allocate the completion queue data structure */
 		ring = rte_zmalloc("ethdev tx cpl queue", sizeof(struct mqnic_cq_ring),
 							RTE_CACHE_LINE_SIZE);
 		if (ring == NULL){
@@ -450,38 +490,21 @@ mqnic_tx_cpl_queue_create(struct rte_eth_dev *dev, int socket_id)
 			return -ENOMEM;
 		}
 
-		ring->size = roundup_pow_of_two(cpl_queue_size);
-		ring->size_mask = ring->size-1;
-		ring->stride = roundup_pow_of_two(MQNIC_CPL_SIZE);
+		// Create completion queue
+		_create_cpl_queue(ring, interface, i);
 
-		ring->buf_size = ring->size*ring->stride;
-		tz = rte_eth_dma_zone_reserve(dev, "tx_cq_ring", i, ring->buf_size,
-				      MQNIC_ALIGN, socket_id);
-		if (tz == NULL) {
-			PMD_INIT_LOG(ERR, "failed to alloc tx cq ring buffer, i = %d, buf_size = 0x%lx, size = 0x%x, stride = 0x%x", i, ring->buf_size, ring->size, ring->stride);
-			rte_free(ring);
-			return -ENOMEM;
-		}
-		ring->buf = (u8*)tz->addr;
-		ring->buf_dma_addr = tz->iova;
+		// Allocate completion queue buffer
+		int ret;
+		if ((ret = _alloc_cpl_queue(ring, dev, i, socket_id)))
+			return ret;
 
-    	ring->hw_addr = priv->hw_addr+priv->tx_cpl_queue_offset+i*MQNIC_CPL_QUEUE_STRIDE;
-    	ring->hw_ptr_mask = 0xffff;
-    	ring->hw_head_ptr = ring->hw_addr+MQNIC_CPL_QUEUE_HEAD_PTR_REG;
-    	ring->hw_tail_ptr = ring->hw_addr+MQNIC_CPL_QUEUE_TAIL_PTR_REG;
-
-    	ring->head_ptr = 0;
-    	ring->tail_ptr = 0;
-
-		PMD_INIT_LOG(DEBUG, "tx ring->buf=%p ring->hw_addr=%p ring->buf_dma_addr=0x%"PRIx64,
-		     ring->buf, ring->hw_addr, ring->buf_dma_addr);
-
+		// Write settings into hardware
 		mqnic_init_cpl_queue_registers(ring);
 
-		priv->tx_cpl_ring[i] = ring;
+		interface->tx_cpl_ring[i] = ring;
 	}
 
-	MQNIC_WRITE_FLUSH(priv);
+	MQNIC_WRITE_FLUSH(interface);
 	return 0;
 }
 
@@ -542,23 +565,21 @@ mqnic_tx_cpl_queue_deactivate(struct rte_eth_dev *dev)
 }
 
 static int
-mqnic_rx_cpl_queue_create(struct rte_eth_dev *dev, int socket_id)
+mqnic_rx_cpl_queue_create(struct mqnic_if *interface, int socket_id)
 {
-	const struct rte_memzone *tz;
 	struct mqnic_cq_ring *ring;
-	uint32_t cpl_queue_size = 256;   //number of event queue
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct mqnic_hw *hw = interface->hw;
+	struct rte_eth_dev *dev = hw->dev;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_rx_cpl_queue_create");
 
-	for (i = 0; i < priv->rx_cpl_queue_count; i++){
+	for (i = 0; i < interface->rx_cpl_queue_count; i++){
 		/* Free memory prior to re-allocation if needed */
-		if (priv->rx_cpl_ring[i] != NULL) {
+		if (interface->rx_cpl_ring[i] != NULL) {
 			PMD_INIT_LOG(DEBUG, "release rx cpl ring %d", i);
-			mqnic_cpl_queue_release(priv->rx_cpl_ring[i]);
-			priv->rx_cpl_ring[i] = NULL;
+			mqnic_cpl_queue_release(interface->rx_cpl_ring[i]);
+			interface->rx_cpl_ring[i] = NULL;
 		}
 
 		/* allocate the event queue data structure */
@@ -569,38 +590,21 @@ mqnic_rx_cpl_queue_create(struct rte_eth_dev *dev, int socket_id)
 			return -ENOMEM;
 		}
 
-		ring->size = roundup_pow_of_two(cpl_queue_size);
-		ring->size_mask = ring->size-1;
-		ring->stride = roundup_pow_of_two(MQNIC_CPL_SIZE);
+		// Create completion queue
+		_create_cpl_queue(ring, interface, i);
 
-		ring->buf_size = ring->size*ring->stride;
-		tz = rte_eth_dma_zone_reserve(dev, "rx_cq_ring", i, ring->buf_size,
-				      MQNIC_ALIGN, socket_id);
-		if (tz == NULL) {
-			PMD_INIT_LOG(ERR, "failed to alloc rx cq ring buffer, i = %d, buf_size = 0x%lx, size = 0x%x, stride = 0x%x", i, ring->buf_size, ring->size, ring->stride);
-			rte_free(ring);
-			return -ENOMEM;
-		}
-		ring->buf = (u8*)tz->addr;
-		ring->buf_dma_addr = tz->iova;
+		// Allocate completion queue buffer
+		int ret;
+		if ((ret = _alloc_cpl_queue(ring, dev, i, socket_id)))
+			return ret;
 
-    	ring->hw_addr = priv->hw_addr+priv->rx_cpl_queue_offset+i*MQNIC_CPL_QUEUE_STRIDE;
-    	ring->hw_ptr_mask = 0xffff;
-    	ring->hw_head_ptr = ring->hw_addr+MQNIC_CPL_QUEUE_HEAD_PTR_REG;
-    	ring->hw_tail_ptr = ring->hw_addr+MQNIC_CPL_QUEUE_TAIL_PTR_REG;
-
-    	ring->head_ptr = 0;
-    	ring->tail_ptr = 0;
-
-		PMD_INIT_LOG(DEBUG, "rx ring->buf=%p ring->hw_addr=%p ring->buf_dma_addr=0x%"PRIx64,
-		     ring->buf, ring->hw_addr, ring->buf_dma_addr);
-
+		// Write settings into hardware
 		mqnic_init_cpl_queue_registers(ring);
 
-		priv->rx_cpl_ring[i] = ring;
+		interface->rx_cpl_ring[i] = ring;
 	}
 
-	MQNIC_WRITE_FLUSH(priv);
+	MQNIC_WRITE_FLUSH(interface);
 	return 0;
 }
 
@@ -996,14 +1000,8 @@ static int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 	mqnic_tx_cpl_queue_create(interface, 0);
 	mqnic_rx_cpl_queue_create(interface, 0);
 
-	
-
-
-
 	// Create ports
 	mqnic_all_port_setup(interface);
-	
-
 
 	hw->interface[idx] = interface;
 

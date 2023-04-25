@@ -143,6 +143,7 @@
 
 
 extern uint32_t event_queue_size;   //number of event queue
+extern uint32_t cpl_queue_size;   //number of event queue
 
 
 #ifndef ETH_ALEN
@@ -536,7 +537,6 @@ struct mqnic_ring {
 
 struct mqnic_cq_ring {
     uint32_t head_ptr;
-
     uint32_t tail_ptr;
 
     uint32_t size;
@@ -549,10 +549,12 @@ struct mqnic_cq_ring {
 
     //struct net_device *ndev;
    // struct napi_struct napi;
-    int ring_index;
+    int index;
     int eq_index;
-
+    int active;
     void (*handler) (struct mqnic_cq_ring *);
+
+    struct mqnic_if *interface;
 
     uint32_t hw_ptr_mask;
     u8 *hw_addr;
