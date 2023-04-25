@@ -6,6 +6,8 @@
 
 #include "mqnic.h"
 
+uint32_t event_queue_size = 1024;   //number of event queue
+
 /*
  * Default values for port configuration
  */
@@ -143,26 +145,26 @@ mqnic_event_queue_release(struct mqnic_eq_ring *ring)
 }
 
 static int
-mqnic_all_event_queue_create(struct rte_eth_dev *dev, int socket_id)
+mqnic_all_event_queue_create(struct mqnic_if *interface, int socket_id)
 {
 	const struct rte_memzone *tz;
 	struct mqnic_eq_ring *ring;
-	uint32_t event_queue_size = 1024;   //number of event queue
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct rte_eth_dev *dev = interface->hw->dev;
+	struct mqnic_hw *hw = interface->hw;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_all_event_queue_create");
 
-	for (i = 0; i < priv->event_queue_count; i++){
+	for (i = 0; i < interface->event_queue_count; i++){
 		/* Free memory prior to re-allocation if needed */
-		if (priv->event_ring[i] != NULL) {
+		if (interface->event_ring[i] != NULL) {
 			PMD_INIT_LOG(DEBUG, "release event ring %d", i);
-			mqnic_event_queue_release(priv->event_ring[i]);
-			priv->event_ring[i] = NULL;
+			mqnic_event_queue_release(interface->event_ring[i]);
+			interface->event_ring[i] = NULL;
 		}
 
 		/* allocate the event queue data structure */
+		// Create event queue
 		ring = rte_zmalloc("ethdev event queue", sizeof(struct mqnic_eq_ring),
 							RTE_CACHE_LINE_SIZE);
 		if (ring == NULL){
@@ -170,13 +172,33 @@ mqnic_all_event_queue_create(struct rte_eth_dev *dev, int socket_id)
 			return -ENOMEM;
 		}
 
+		ring->interface = interface;
+		ring->index = i;
+		ring->active = 0;
+
+		ring->hw_addr = interface->hw_addr + interface->event_queue_offset
+			+ i * interface->event_queue_stride;
+		ring->hw_ptr_mask = 0xffff;
+		ring->hw_head_ptr = ring->hw_addr + MQNIC_EVENT_QUEUE_HEAD_PTR_REG;
+		ring->hw_tail_ptr = ring->hw_addr + MQNIC_EVENT_QUEUE_TAIL_PTR_REG;
+
+		ring->head_ptr = 0;
+		ring->tail_ptr = 0;
+
+		PMD_INIT_LOG(DEBUG, "ring->buf=%p ring->hw_addr=%p ring->buf_dma_addr=0x%"PRIx64,
+		     ring->buf, ring->hw_addr, ring->buf_dma_addr);
+
+		// Deactivate queue
+		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
+
+		// Allocate event queue
 		ring->size = roundup_pow_of_two(event_queue_size);
-		ring->size_mask = ring->size-1;
+		ring->size_mask = ring->size - 1;
 		ring->stride = roundup_pow_of_two(MQNIC_EVENT_SIZE);
 
-		ring->buf_size = ring->size*ring->stride;
-		tz = rte_eth_dma_zone_reserve(dev, "event_ring", i, ring->buf_size,
-				      MQNIC_ALIGN, socket_id);
+		ring->buf_size = ring->size * ring->stride;
+		tz = rte_eth_dma_zone_reserve(dev, "event_ring", i,
+				ring->buf_size, MQNIC_ALIGN, socket_id);
 		if (tz == NULL) {
 			PMD_INIT_LOG(ERR, "failed to alloc event ring buffer, i = %d.", i);
 			rte_free(ring);
@@ -185,33 +207,21 @@ mqnic_all_event_queue_create(struct rte_eth_dev *dev, int socket_id)
 		ring->buf = (u8*)tz->addr;
 		ring->buf_dma_addr = tz->iova;
 
-    	ring->hw_addr = priv->hw_addr+priv->event_queue_offset+i*MQNIC_EVENT_QUEUE_STRIDE;
-    	ring->hw_ptr_mask = 0xffff;
-    	ring->hw_head_ptr = ring->hw_addr+MQNIC_EVENT_QUEUE_HEAD_PTR_REG;
-    	ring->hw_tail_ptr = ring->hw_addr+MQNIC_EVENT_QUEUE_TAIL_PTR_REG;
-
-    	ring->head_ptr = 0;
-    	ring->tail_ptr = 0;
-
-		PMD_INIT_LOG(DEBUG, "ring->buf=%p ring->hw_addr=%p ring->buf_dma_addr=0x%"PRIx64,
-		     ring->buf, ring->hw_addr, ring->buf_dma_addr);
-
-		// deactivate queue
-		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
-    	// set base address
+		// set base address
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_BASE_ADDR_REG+0, ring->buf_dma_addr);
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_BASE_ADDR_REG+4, ring->buf_dma_addr >> 32);
-    	// set interrupt index
-    	MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_INTERRUPT_INDEX_REG, 0);
-    	// set pointers
+		// set interrupt index
+		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_INTERRUPT_INDEX_REG, 0);
+		// set pointers
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_HEAD_PTR_REG, ring->head_ptr & ring->hw_ptr_mask);
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_TAIL_PTR_REG, ring->tail_ptr & ring->hw_ptr_mask);
 		// set size
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size));
 
-		priv->event_ring[i] = ring;
+		interface->event_ring[i] = ring;
 	}
-	MQNIC_WRITE_FLUSH(priv);
+
+	MQNIC_WRITE_FLUSH(interface);
 
 	return 0;
 }
@@ -812,12 +822,13 @@ mqnic_all_port_deactivate(struct rte_eth_dev *dev)
 	return;
 }
 
-static int mqnic_create_if(struct mqnic_hw *hw, int idx) {
+static int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 	int ret = 0;
 	u32 i = 0;
 	u32 desc_block_size;
 	struct mqnic_if *interface;
 	struct mqnic_reg_block *rb;
+	struct mqnic_hw *hw = MQNIC_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 
 	interface = rte_zmalloc("mqnic interface", sizeof(struct mqnic_if), 0);
 	if (!interface)
@@ -981,16 +992,16 @@ static int mqnic_create_if(struct mqnic_hw *hw, int idx) {
 	desc_block_size = mqnic_determine_desc_block_size(interface);
 
 	// Create rings
-	mqnic_all_event_queue_create(eth_dev, 0);
-	mqnic_tx_cpl_queue_create(eth_dev, 0);
-	mqnic_rx_cpl_queue_create(eth_dev, 0);
-	mqnic_all_port_setup(eth_dev);
+	mqnic_all_event_queue_create(interface, 0);
+	mqnic_tx_cpl_queue_create(interface, 0);
+	mqnic_rx_cpl_queue_create(interface, 0);
 
 	
 
 
 
 	// Create ports
+	mqnic_all_port_setup(interface);
 	
 
 
@@ -1217,7 +1228,7 @@ eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 	for (int i = 0; i < hw->if_count; i++) {
 		PMD_INIT_LOG(INFO, "Creating interface %d", i);
 		/*error = eth_mqnic_get_if_hw_info(eth_dev);*/
-		error = mqnic_create_if(hw, i);
+		error = mqnic_create_if(eth_dev, i);
 		if (error) {
 			PMD_INIT_LOG(ERR, "Failed to create interface %d", i);
 			goto fail_create_if;
@@ -1598,7 +1609,7 @@ eth_mqnic_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 
 RTE_PMD_REGISTER_PCI(net_mqnic_igb, rte_mqnic_pmd);
 RTE_PMD_REGISTER_PCI_TABLE(net_mqnic_igb, pci_id_mqnic_map);
-RTE_PMD_REGISTER_KMOD_DEP(net_mqnic_igb, "uio_pci_generic");
+RTE_PMD_REGISTER_KMOD_DEP(net_mqnic_igb, "* uio_pci_generic | vfio");
 
 /* see mqnic_logs.c */
 RTE_INIT(mqnic_init_log)

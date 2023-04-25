@@ -272,7 +272,7 @@ eth_mqnic_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 	uint16_t nb_rx;
 	uint16_t nb_hold;
 	uint32_t cq_index;
-    uint32_t cq_tail_ptr;
+	uint32_t cq_tail_ptr;
 	uint32_t cq_desc_inline_index;
 	uint32_t ring_clean_tail_ptr;
 	volatile struct mqnic_cpl *cpl;

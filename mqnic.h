@@ -9,6 +9,7 @@
 
 #include "mqnic_osdep.h"
 #include "mqnic_regs.h"
+#include "rte_ethdev_core.h"
 
 #include <stdio.h>
 #include <errno.h>
@@ -141,6 +142,9 @@
 #define MQNIC_ERR_INVM_VALUE_NOT_FOUND	20
 
 
+extern uint32_t event_queue_size;   //number of event queue
+
+
 #ifndef ETH_ALEN
 #define ETH_ALEN 6
 #endif
@@ -261,6 +265,7 @@ struct mqnic_mac_info {
 
 struct mqnic_hw {
 	void *back;
+	struct rte_eth_dev *dev;
 
 	u8 *flash_address;
 	unsigned long io_base;
@@ -557,7 +562,6 @@ struct mqnic_cq_ring {
 
 struct mqnic_eq_ring {
     uint32_t head_ptr;
-
     uint32_t tail_ptr;
 
     uint32_t size;
@@ -568,12 +572,12 @@ struct mqnic_eq_ring {
     u8 *buf;
     uint64_t buf_dma_addr;
 
-    //struct net_device *ndev;
-    int int_index;
-
+    int index;
     int irq;
-
+    int active;
     void (*handler) (struct mqnic_eq_ring *);
+
+    struct mqnic_if *interface;
 
     uint32_t hw_ptr_mask;
     u8 *hw_addr;
