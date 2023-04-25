@@ -5,7 +5,7 @@
  * All rights reserved.
  */
 
-#include "mqnic_ethdev.h"
+#include "mqnic.h"
 
 struct mqnic_reg_block *mqnic_enumerate_reg_block_list(u8 *addr, size_t offset, size_t size)
 {

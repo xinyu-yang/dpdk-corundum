@@ -5,7 +5,11 @@
  */
 
 #include "mqnic.h"
+#include "mqnic_logs.h"
+#include "mqnic_osdep.h"
+#include "mqnic_regs.h"
 #include <infiniband/verbs.h>
+#include <stdint.h>
 
 uint32_t event_queue_size = 1024;   //number of event queue
 uint32_t cpl_queue_size = 1024;   //number of event queue
@@ -692,7 +696,7 @@ static void mqnic_port_set_rss_mask(struct mqnic_port *port, u32 rss_mask)
 static void mqnic_deactivate_port(struct mqnic_port *port)
 {
     // disable schedulers
-	MQNIC_DIRECT_WRITE_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_ENABLE, 0);
+	MQNIC_DIRECT_WRITE_REG(port->port_ctrl_rb, MQNIC_PORT_REG_SCHED_ENABLE, 0);
 }
 
 static int mqnic_activate_first_port(struct rte_eth_dev *dev)
@@ -703,7 +707,7 @@ static int mqnic_activate_first_port(struct rte_eth_dev *dev)
 	struct mqnic_port *port = priv->ports[0];
 
     // enable schedulers
-	MQNIC_DIRECT_WRITE_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_ENABLE, 0xffffffff);
+	MQNIC_DIRECT_WRITE_REG(port->hw_addr, MQNIC_PORT_REG, 0xffffffff);
 
     // enable queues
     for (k = 0; k < port->tx_queue_count; k++)
@@ -730,75 +734,117 @@ mqnic_set_port_mtu(struct rte_eth_dev *dev, uint32_t mtu)
 	}
 }
 
-static int
-mqnic_all_port_setup(struct rte_eth_dev *dev)
-{
-	struct mqnic_port *port;
-	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
-	
-	PMD_INIT_LOG(DEBUG, "eth_mqnic_all_port_setup");
 
-	for (i = 0; i < priv->port_count; i++){
-		/* allocate the event queue data structure */
-		port = rte_zmalloc("ethdev port", sizeof(struct mqnic_port),
-							RTE_CACHE_LINE_SIZE);
-		if (port == NULL){
-			PMD_INIT_LOG(ERR, "failed to alloc port");
-			return -ENOMEM;
-		}
+static int mqnic_single_port_create(struct mqnic_if *interface, int i) {
+	int ret=0;
+	u32 offset;
+	struct mqnic_reg_block *port_rb;
 
-		priv->ports[i] = port;
-
-    	port->index = i;
-    	port->tx_queue_count = priv->tx_queue_count;
-    	port->hw_addr = priv->hw_addr+priv->port_offset+i*priv->port_stride;
-
-		// read ID registers
-		port->port_id = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_PORT_ID);
-    	PMD_INIT_LOG(INFO, "Port ID: 0x%08x", port->port_id);
-		port->port_features = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_PORT_FEATURES);
-    	PMD_INIT_LOG(INFO, "Port features: 0x%08x", port->port_features);
-		port->port_mtu = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_PORT_MTU);
-    	PMD_INIT_LOG(INFO, "Port MTU: %d", port->port_mtu);
-
-    	port->sched_count = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_COUNT);
-    	PMD_INIT_LOG(INFO, "Scheduler count: %d", port->sched_count);
-    	port->sched_offset = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_OFFSET);
-    	PMD_INIT_LOG(INFO, "Scheduler offset: 0x%08x", port->sched_offset);
-    	port->sched_stride = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_STRIDE);
-    	PMD_INIT_LOG(INFO, "Scheduler stride: 0x%08x", port->sched_stride);
-    	port->sched_type = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_TYPE);
-    	PMD_INIT_LOG(INFO, "Scheduler type: 0x%08x", port->sched_type);
-
-		mqnic_deactivate_port(port);
-
-		mqnic_port_set_rss_mask(port, 0xffffffff);
+	/* allocate the event queue data structure */
+	struct mqnic_port *port = rte_zmalloc("ethdev port", sizeof(struct mqnic_port),
+						RTE_CACHE_LINE_SIZE);
+	if (port == NULL){
+		PMD_INIT_LOG(ERR, "Failed to alloc port");
+		ret = -ENOMEM;
+		goto fail;
 	}
-	MQNIC_WRITE_FLUSH(priv);
 
-	return 0;
+	// Get register block for port i
+	port_rb = mqnic_find_reg_block(interface->rb_list, MQNIC_RB_PORT_TYPE, MQNIC_RB_PORT_VER, i);
+	if (!port_rb) {
+		PMD_INIT_LOG(ERR, "Port %d not found", i);
+		ret = -EIO;
+		goto fail;
+	}
+
+	port->index = i;
+	port->interface = interface;
+	port->port_rb = port_rb;
+
+	// Emumerate register block list for port i
+	offset = MQNIC_DIRECT_READ_REG(port_rb->regs, MQNIC_RB_SCHED_BLOCK_REG_OFFSET);
+	port->rb_list = mqnic_enumerate_reg_block_list(interface->hw_addr,
+			offset, interface->hw_regs_size - offset);
+	if (port->rb_list == NULL){
+		PMD_INIT_LOG(ERR, "Failed to enumerate blocks");
+		ret = -EIO;
+		goto fail;
+	}
+
+	PMD_INIT_LOG(INFO, "Port-level register blocks:");
+	for (rb = port->rb_list; rb->regs; rb++)
+		PMD_INIT_LOG(INFO, " type 0x%08x (v %d.%d.%d.%d)", rb->type, rb->version >> 24,
+			(rb->version >> 16) & 0xff, (rb->version >> 8) & 0xff, rb->version & 0xff);
+
+	// Get control register blocks
+	port->port_ctrl_rb = mqnic_find_reg_block(port->rb_list, MQNIC_RB_PORT_CTRL_TYPE, MQNIC_RB_PORT_CTRL_VER, 0);
+	if (!port->port_ctrl_rb) {
+		PMD_INIT_LOG(ERR, "Port control register block not found");
+		ret = -EIO;
+		goto fail;
+	}
+
+	// read ID registers
+	port->port_features = MQNIC_DIRECT_READ_REG(port->port_ctrl_rb->regs, MQNIC_RB_PORT_CTRL_REG_FEATURES);
+	PMD_INIT_LOG(INFO, "Port features: 0x%08x", port->port_features);
+	PMD_INIT_LOG(INFO, "Port TX status: 0x%08x", mqnic_port_get_tx_status(port));
+	PMD_INIT_LOG(INFO, "Port RX status: 0x%08x", mqnic_port_get_rx_status(port));
+
+	/*port->port_mtu = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_PORT_MTU);*/
+	/*PMD_INIT_LOG(INFO, "Port MTU: %d", port->port_mtu);*/
+	/*port->sched_count = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_COUNT);*/
+	/*PMD_INIT_LOG(INFO, "Scheduler count: %d", port->sched_count);*/
+	/*port->sched_offset = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_OFFSET);*/
+	/*PMD_INIT_LOG(INFO, "Scheduler offset: 0x%08x", port->sched_offset);*/
+	/*port->sched_stride = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_STRIDE);*/
+	/*PMD_INIT_LOG(INFO, "Scheduler stride: 0x%08x", port->sched_stride);*/
+	/*port->sched_type = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_TYPE);*/
+	/*PMD_INIT_LOG(INFO, "Scheduler type: 0x%08x", port->sched_type);*/
+
+	/*mqnic_deactivate_port(port);*/
+	/*mqnic_port_set_rss_mask(port, 0xffffffff);*/
+	interface->ports[i] = port;
+fail:
+	mqnic_single_port_destroy(port);
+	return ret;
+}
+
+static void mqnic_single_port_destroy(struct mqnic_port *port) {
+	mqnic_deactivate_port(port);
+	mqnic_free_reg_block_list(port->rb_list);
+	rte_free(port);
+}
+
+static int
+mqnic_all_ports_create(struct mqnic_if *interface)
+{
+	uint32_t i;
+	int ret;
+	PMD_INIT_LOG(DEBUG, "eth_mqnic_all_ports_create");
+
+	for (i = 0; i < interface->port_count; i++){
+		mqnic_single_port_create(interface, i);
+	}
+	MQNIC_WRITE_FLUSH(interface);
+
+fail:
+	mqnic_all_port_destroy(dev)
+	return ret;
 }
 
 static void
-mqnic_all_port_disable(struct rte_eth_dev *dev)
+mqnic_all_ports_destroy(struct mqnic_if *interface)
 {
 	struct mqnic_port *port;
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
 
-	PMD_INIT_LOG(DEBUG, "mqnic_all_port_disable");
+	PMD_INIT_LOG(DEBUG, "mqnic_all_ports_destroy");
 
-	for (i = 0; i < priv->port_count; i++){
-		if (priv->ports[i] != NULL) {
-			port = priv->ports[i];
-			mqnic_deactivate_port(port);
-			MQNIC_WRITE_FLUSH(priv);
+	for (i = 0; i < interface->port_count; i++){
+		if (interface->ports[i] != NULL) {
 			PMD_INIT_LOG(DEBUG, "release port %d", i);
-			rte_free(port);
-			priv->ports[i] = NULL;
+			mqnic_single_port_destroy(interface->ports[i]);
+			interface->ports[i] = NULL;
 		}
 	}
 
@@ -1001,7 +1047,7 @@ static int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 	mqnic_rx_cpl_queue_create(interface, 0);
 
 	// Create ports
-	mqnic_all_port_setup(interface);
+	mqnic_all_ports_create(interface);
 
 	hw->interface[idx] = interface;
 
@@ -1615,3 +1661,12 @@ RTE_INIT(mqnic_init_log)
 	mqnic_mqnic_init_log();
 }
 
+u32 mqnic_port_get_tx_status(struct mqnic_port *port)
+{
+	return MQNIC_DIRECT_READ_REG(port->port_ctrl_rb->regs, MQNIC_RB_PORT_CTRL_REG_TX_STATUS);
+}
+
+u32 mqnic_port_get_rx_status(struct mqnic_port *port)
+{
+	return MQNIC_DIRECT_READ_REG(port->port_ctrl_rb->regs, MQNIC_RB_PORT_CTRL_REG_RX_STATUS);
+}

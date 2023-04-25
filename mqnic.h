@@ -379,22 +379,15 @@ struct mqnic_if {
 };
 
 struct mqnic_port {
-    struct device *dev;
-    struct net_device *ndev;
+	struct mqnic_if *interface;
 
-    int index;
+	struct mqnic_reg_block *port_rb;
+	struct mqnic_reg_block *rb_list;
+	struct mqnic_reg_block *port_ctrl_rb;
 
-    uint32_t tx_queue_count;
+	int index;
 
-    uint32_t port_id;
-    uint32_t port_features;
-    uint32_t port_mtu;
-    uint32_t sched_count;
-    uint32_t sched_offset;
-    uint32_t sched_stride;
-    uint32_t sched_type;
-
-    u8 *hw_addr;
+	u32 port_features;
 };
 
 
