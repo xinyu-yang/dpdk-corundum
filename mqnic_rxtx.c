@@ -23,7 +23,7 @@ mqnic_deactivate_tx_queue(struct mqnic_tx_queue *txq)
 static void 
 mqnic_deactivate_rx_queue(struct mqnic_rx_queue *rxq)
 {
-    // deactivate queue
+	// deactivate queue
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(rxq->size) | (rxq->log_desc_block_size << 8));
 }
 

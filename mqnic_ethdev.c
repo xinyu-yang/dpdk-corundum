@@ -6,12 +6,6 @@
 
 #include "mqnic.h"
 #include "mqnic_logs.h"
-#include "mqnic_osdep.h"
-#include "mqnic_regs.h"
-#include "rte_ethdev_core.h"
-#include "rte_malloc.h"
-#include <infiniband/verbs.h>
-#include <stdint.h>
 
 uint32_t event_queue_size = 1024;   //number of event queue
 uint32_t cpl_queue_size = 1024;   //number of event queue
@@ -235,27 +229,26 @@ mqnic_all_event_queue_create(struct mqnic_if *interface, int socket_id)
 }
 
 static void
-mqnic_all_event_queue_destroy(struct rte_eth_dev *dev)
+mqnic_all_event_queue_destroy(struct mqnic_if *interface)
 {
 	struct mqnic_eq_ring *ring;
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct rte_eth_dev *dev = interface->hw->dev;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_all_event_queue_destroy");
 
-	for (i = 0; i < priv->event_queue_count; i++){
+	for (i = 0; i < interface->event_queue_count; i++){
 		/* Free memory prior to re-allocation if needed */
-		if (priv->event_ring[i] != NULL) {
-			ring = priv->event_ring[i];
+		if (interface->event_ring[i] != NULL) {
+			ring = interface->event_ring[i];
 			// deactivate queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size));
 			// disarm queue
-			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_INTERRUPT_INDEX_REG, ring->int_index);
-			MQNIC_WRITE_FLUSH(priv);
+			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_INTERRUPT_INDEX_REG, ring->index);
+			MQNIC_WRITE_FLUSH(interface);
 			PMD_INIT_LOG(DEBUG, "release event ring %d", i);
-			mqnic_event_queue_release(priv->event_ring[i]);
-			priv->event_ring[i] = NULL;
+			mqnic_event_queue_release(interface->event_ring[i]);
+			interface->event_ring[i] = NULL;
 		}
 
 		rte_eth_dma_zone_free(dev, "event_ring", i);
@@ -265,24 +258,22 @@ mqnic_all_event_queue_destroy(struct rte_eth_dev *dev)
 }
 
 static void
-mqnic_all_event_queue_deactivate(struct rte_eth_dev *dev)
+mqnic_all_event_queue_deactivate(struct mqnic_if *interface)
 {
 	struct mqnic_eq_ring *ring;
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_all_event_queue_deactivate");
 
-	for (i = 0; i < priv->event_queue_count; i++){
+	for (i = 0; i < interface->event_queue_count; i++){
 		/* Free memory prior to re-allocation if needed */
-		if (priv->event_ring[i] != NULL) {
-			ring = priv->event_ring[i];
+		if (interface->event_ring[i] != NULL) {
+			ring = interface->event_ring[i];
 			// deactivate queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size));
 			// disarm queue
-			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_INTERRUPT_INDEX_REG, ring->int_index);
-			MQNIC_WRITE_FLUSH(priv);
+			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_INTERRUPT_INDEX_REG, ring->index);
+			MQNIC_WRITE_FLUSH(interface);
 		}
 	}
 
@@ -313,7 +304,7 @@ mqnic_all_event_queue_active(struct rte_eth_dev *dev)
 			PMD_INIT_LOG(ERR, "invalid event ring buffer, i = %d.", i);
 			return -1;
 		}
-		ring->int_index = int_index;
+		ring->index = int_index;
 
 		// deactivate queue
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
@@ -321,7 +312,7 @@ mqnic_all_event_queue_active(struct rte_eth_dev *dev)
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_BASE_ADDR_REG+0, ring->buf_dma_addr);
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_BASE_ADDR_REG+4, ring->buf_dma_addr >> 32);
   		// set interrupt index
-		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_INTERRUPT_INDEX_REG, ring->int_index);
+		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_INTERRUPT_INDEX_REG, ring->index);
 		// set pointers
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_HEAD_PTR_REG, ring->head_ptr & ring->hw_ptr_mask);
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_TAIL_PTR_REG, ring->tail_ptr & ring->hw_ptr_mask);
@@ -414,7 +405,7 @@ mqnic_tx_cpl_queue_active(struct rte_eth_dev *dev)
 			return;
 		}
 		ring->eq_index = i % priv->event_queue_count;
-		ring->ring_index = i;
+		ring->index = i;
 
 		mqnic_active_cpl_queue_registers(ring);
 		mqnic_arm_cq(ring);
@@ -442,7 +433,7 @@ mqnic_rx_cpl_queue_active(struct rte_eth_dev *dev)
 			return;
 		}
 		ring->eq_index = i % priv->event_queue_count;
-		ring->ring_index = i;
+		ring->index = i;
 
 		mqnic_active_cpl_queue_registers(ring);
 		mqnic_arm_cq(ring);
@@ -515,28 +506,27 @@ mqnic_tx_cpl_queue_create(struct mqnic_if *interface, int socket_id)
 }
 
 static void
-mqnic_tx_cpl_queue_destroy(struct rte_eth_dev *dev)
+mqnic_tx_cpl_queue_destroy(struct mqnic_if *interface)
 {
 	//const struct rte_memzone *tz;
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct rte_eth_dev *dev = interface->hw->dev;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_tx_cpl_queue_destroy");
 
-	for (i = 0; i < priv->tx_cpl_queue_count; i++){
+	for (i = 0; i < interface->tx_cpl_queue_count; i++){
 
-		if (priv->tx_cpl_ring[i] != NULL) {
-			ring = priv->tx_cpl_ring[i];
+		if (interface->tx_cpl_ring[i] != NULL) {
+			ring = interface->tx_cpl_ring[i];
 			// deactivate queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size));
     		// disarm queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, ring->eq_index);
-			MQNIC_WRITE_FLUSH(priv);
+			MQNIC_WRITE_FLUSH(interface);
 			PMD_INIT_LOG(DEBUG, "release tx cpl ring %d", i);
 			mqnic_cpl_queue_release(ring);
-			priv->tx_cpl_ring[i] = NULL;
+			interface->tx_cpl_ring[i] = NULL;
 		}
 
 		rte_eth_dma_zone_free(dev, "tx_cq_ring", i);
@@ -546,24 +536,22 @@ mqnic_tx_cpl_queue_destroy(struct rte_eth_dev *dev)
 }
 
 static void
-mqnic_tx_cpl_queue_deactivate(struct rte_eth_dev *dev)
+mqnic_tx_cpl_queue_deactivate(struct mqnic_if *interface)
 {
 	//const struct rte_memzone *tz;
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_tx_cpl_queue_deactivate");
 
-	for (i = 0; i < priv->tx_cpl_queue_count; i++){
-		if (priv->tx_cpl_ring[i] != NULL) {
-			ring = priv->tx_cpl_ring[i];
+	for (i = 0; i < interface->tx_cpl_queue_count; i++){
+		if (interface->tx_cpl_ring[i] != NULL) {
+			ring = interface->tx_cpl_ring[i];
 			// deactivate queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size));
     		// disarm queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, ring->eq_index);
-			MQNIC_WRITE_FLUSH(priv);
+			MQNIC_WRITE_FLUSH(interface);
 		}
 	}
 
@@ -615,28 +603,27 @@ mqnic_rx_cpl_queue_create(struct mqnic_if *interface, int socket_id)
 }
 
 static void
-mqnic_rx_cpl_queue_destroy(struct rte_eth_dev *dev)
+mqnic_rx_cpl_queue_destroy(struct mqnic_if *interface)
 {
 	//const struct rte_memzone *tz;
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct rte_eth_dev *dev = interface->hw->dev;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_rx_cpl_queue_destroy");
 
-	for (i = 0; i < priv->rx_cpl_queue_count; i++){
+	for (i = 0; i < interface->rx_cpl_queue_count; i++){
 		/* Free memory prior to re-allocation if needed */
-		if (priv->rx_cpl_ring[i] != NULL) {
-			ring = priv->rx_cpl_ring[i];
+		if (interface->rx_cpl_ring[i] != NULL) {
+			ring = interface->rx_cpl_ring[i];
 			// deactivate queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size));
-    		// disarm queue
+			// disarm queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, ring->eq_index);
-			MQNIC_WRITE_FLUSH(priv);
+			MQNIC_WRITE_FLUSH(interface);
 			PMD_INIT_LOG(DEBUG, "release rx cpl ring %d", i);
 			mqnic_cpl_queue_release(ring);
-			priv->rx_cpl_ring[i] = NULL;
+			interface->rx_cpl_ring[i] = NULL;
 		}
 
 		rte_eth_dma_zone_free(dev, "rx_cq_ring", i);
@@ -646,25 +633,23 @@ mqnic_rx_cpl_queue_destroy(struct rte_eth_dev *dev)
 }
 
 static void
-mqnic_rx_cpl_queue_deactivate(struct rte_eth_dev *dev)
+mqnic_rx_cpl_queue_deactivate(struct mqnic_if *interface)
 {
 	//const struct rte_memzone *tz;
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_rx_cpl_queue_deactivate");
 
-	for (i = 0; i < priv->rx_cpl_queue_count; i++){
+	for (i = 0; i < interface->rx_cpl_queue_count; i++){
 		/* Free memory prior to re-allocation if needed */
-		if (priv->rx_cpl_ring[i] != NULL) {
-			ring = priv->rx_cpl_ring[i];
+		if (interface->rx_cpl_ring[i] != NULL) {
+			ring = interface->rx_cpl_ring[i];
 			// deactivate queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size));
     		// disarm queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, ring->eq_index);
-			MQNIC_WRITE_FLUSH(priv);
+			MQNIC_WRITE_FLUSH(interface);
 		}
 	}
 
@@ -690,35 +675,35 @@ mqnic_determine_desc_block_size(struct mqnic_if *interface)
 	return desc_block_size;
 }
 
-static void mqnic_port_set_rss_mask(struct mqnic_port *port, u32 rss_mask)
-{
-	MQNIC_DIRECT_WRITE_REG(port->hw_addr, MQNIC_PORT_REG_RSS_MASK, rss_mask);
-}
+/*static void mqnic_port_set_rss_mask(struct mqnic_port *port, u32 rss_mask)*/
+/*{*/
+	/*MQNIC_DIRECT_WRITE_REG(port->hw_addr, MQNIC_PORT_REG_RSS_MASK, rss_mask);*/
+/*}*/
 
-static void mqnic_deactivate_port(struct mqnic_port *port)
+static void mqnic_deactivate_scheduler(struct mqnic_sched *sched)
 {
     // disable schedulers
-	MQNIC_DIRECT_WRITE_REG(port->port_ctrl_rb, MQNIC_PORT_REG_SCHED_ENABLE, 0);
+	MQNIC_DIRECT_WRITE_REG(sched->rb->regs, MQNIC_RB_SCHED_RR_REG_CTRL, 0);
 }
 
 static int mqnic_activate_first_port(struct rte_eth_dev *dev)
 {
-    uint32_t k;
+	uint32_t k;
 	struct mqnic_priv *priv =
 		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
 	struct mqnic_port *port = priv->ports[0];
 
-    // enable schedulers
+	// enable schedulers
 	MQNIC_DIRECT_WRITE_REG(port->hw_addr, MQNIC_PORT_REG, 0xffffffff);
 
-    // enable queues
-    for (k = 0; k < port->tx_queue_count; k++)
-    {
+	// enable queues
+	for (k = 0; k < port->tx_queue_count; k++)
+	{
 		MQNIC_DIRECT_WRITE_REG(port->hw_addr, port->sched_offset+k*4, 3);
-    }
+	}
 	MQNIC_WRITE_FLUSH(priv);
 
-    return 0;
+	return 0;
 }
 
 static void
@@ -843,10 +828,10 @@ mqnic_all_ports_destroy(struct mqnic_if *interface)
 	PMD_INIT_LOG(DEBUG, "mqnic_all_ports_destroy");
 
 	for (i = 0; i < interface->port_count; i++){
-		if (interface->ports[i] != NULL) {
+		if (interface->port[i] != NULL) {
 			PMD_INIT_LOG(DEBUG, "release port %d", i);
-			mqnic_single_port_destroy(interface->ports[i]);
-			interface->ports[i] = NULL;
+			mqnic_single_port_destroy(interface->port[i]);
+			interface->port[i] = NULL;
 		}
 	}
 
@@ -854,20 +839,21 @@ mqnic_all_ports_destroy(struct mqnic_if *interface)
 }
 
 static void
-mqnic_all_port_deactivate(struct rte_eth_dev *dev)
+mqnic_all_port_deactivate(struct mqnic_if *interface)
 {
 	uint32_t i;
 	struct mqnic_port *port;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
 
 	PMD_INIT_LOG(DEBUG, "mqnic_all_port_deactivate");
 
-	for (i = 0; i < priv->port_count; i++){
-		if (priv->ports[i] != NULL) {
-			port = priv->ports[i];
-			mqnic_deactivate_port(port);
-			MQNIC_WRITE_FLUSH(priv);
+	for (i = 0; i < interface->port_count; i++){
+		if (interface->port[i] != NULL) {
+			port = interface->port[i];
+			if (port->rb_list) {
+				mqnic_free_reg_block_list(port->rb_list);
+			}
+			interface->port[i] = NULL;
+			MQNIC_WRITE_FLUSH(interface);
 		}
 	}
 
@@ -1567,18 +1553,28 @@ eth_mqnic_start(struct rte_eth_dev *dev)
 static int
 eth_mqnic_stop(struct rte_eth_dev *dev)
 {
+	int idx;
 	struct rte_eth_link link;
 	struct mqnic_adapter *adapter =
 		MQNIC_DEV_PRIVATE(dev->data->dev_private);
+	struct mqnic_hw *hw = adapter->hw;
+	struct mqnic_if *interface;
 
 	if (adapter->stopped)
 		return 0;
 
-	mqnic_all_port_deactivate(dev);
-	mqnic_dev_deactive_queues(dev);
-	mqnic_tx_cpl_queue_deactivate(dev);
-	mqnic_rx_cpl_queue_deactivate(dev);
-	mqnic_all_event_queue_deactivate(dev);
+	// Stop all interfaces
+	for (idx=0; idx<hw->if_count; idx++) {
+		interface = hw->interface[idx];
+		PMD_INIT_LOG(INFO, "Stopping interface %d", idx);
+
+		mqnic_all_port_deactivate(interface);
+		mqnic_dev_deactive_queues(dev);
+		mqnic_tx_cpl_queue_deactivate(interface);
+		mqnic_rx_cpl_queue_deactivate(interface);
+		mqnic_all_event_queue_deactivate(interface);
+	}
+
 	rte_delay_us_sleep(10000);
 	mqnic_dev_clear_queues(dev);
 
@@ -1597,17 +1593,25 @@ eth_mqnic_close(struct rte_eth_dev *dev)
 {
 	struct rte_eth_link link;
 	int ret;
+	struct mqnic_hw *hw = adapter->hw;
+	struct mqnic_if *interface;
 
 	if (rte_eal_process_type() != RTE_PROC_PRIMARY)
 		return 0;
 
 	ret = eth_mqnic_stop(dev);
 
-	mqnic_all_port_disable(dev);
-	mqnic_dev_free_queues(dev);
-	mqnic_tx_cpl_queue_destroy(dev);
-	mqnic_rx_cpl_queue_destroy(dev);
-	mqnic_all_event_queue_destroy(dev);
+	// Close all interfaces
+	for (idx=0; idx<hw->if_count; idx++) {
+		interface = hw->interface[idx];
+		PMD_INIT_LOG(INFO, "Closing interface %d", idx);
+
+		mqnic_all_ports_destroy(interface);
+		mqnic_dev_free_queues(dev);
+		mqnic_tx_cpl_queue_destroy(interface);
+		mqnic_rx_cpl_queue_destroy(interface);
+		mqnic_all_event_queue_destroy(dev);
+	}
 
 	memset(&link, 0, sizeof(link));
 	rte_eth_linkstatus_set(dev, &link);
