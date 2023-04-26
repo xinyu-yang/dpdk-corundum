@@ -1,6 +1,6 @@
 # DPDK PMD Driver for Corundum
 
-Based on the original project https://github.com/liuw666-bruce/DPDK-with-Corundum , which seems to be based on https://github.com/missinglinkelectronics/dpdk-stable/tree/add_corundum_mqnic_pmd/drivers/net/mqnic .
+Based on the [original project](https://github.com/liuw666-bruce/DPDK-with-Corundum), which seems to be based on [this project](https://github.com/missinglinkelectronics/dpdk-stable/tree/add_corundum_mqnic_pmd/drivers/net/mqnic).
 
 ## Install
 Downloading `dpdk-20.11` from http://core.dpdk.org/download/ , and uncompress it into `dpdk-20.11/`.

@@ -466,7 +466,7 @@ struct mqnic_priv {
  * Structure to store private data for each driver instance (for each port).
  */
 struct mqnic_adapter {
-	struct mqnic_hw         hw;
+	struct mqnic_hw hw;
 	struct mqnic_priv priv;
 	//struct mqnic_hw_stats   stats;
 	//struct mqnic_interrupt  intr;
@@ -558,55 +558,57 @@ struct mqnic_ring {
 // ____cacheline_aligned_in_smp;
 
 struct mqnic_cq_ring {
-    uint32_t head_ptr;
-    uint32_t tail_ptr;
+	uint32_t head_ptr;
+	uint32_t tail_ptr;
 
-    uint32_t size;
-    uint32_t size_mask;
-    uint32_t stride;
+	uint32_t size;
+	uint32_t size_mask;
+	uint32_t stride;
 
-    size_t buf_size;
-    u8 *buf;
-    uint64_t buf_dma_addr;
+	size_t buf_size;
+	u8 *buf;
+	uint64_t buf_dma_addr;
 
-    //struct net_device *ndev;
-   // struct napi_struct napi;
-    int index;
-    int eq_index;
-    int active;
-    void (*handler) (struct mqnic_cq_ring *);
+	//struct net_device *ndev;
+	// struct napi_struct napi;
+	int index;
+	int eq_index;
+	int active;
+	void (*handler) (struct mqnic_cq_ring *);
 
-    struct mqnic_if *interface;
+	struct mqnic_if *interface;
+	struct mqnic_eq_ring *eq_ring;
+	struct mqnic_ring *src_ring;
 
-    uint32_t hw_ptr_mask;
-    u8 *hw_addr;
-    u8 *hw_head_ptr;
-    u8 *hw_tail_ptr;
+	uint32_t hw_ptr_mask;
+	u8 *hw_addr;
+	u8 *hw_head_ptr;
+	u8 *hw_tail_ptr;
 };
 
 struct mqnic_eq_ring {
-    uint32_t head_ptr;
-    uint32_t tail_ptr;
+	uint32_t head_ptr;
+	uint32_t tail_ptr;
 
-    uint32_t size;
-    uint32_t size_mask;
-    uint32_t stride;
+	uint32_t size;
+	uint32_t size_mask;
+	uint32_t stride;
 
-    size_t buf_size;
-    u8 *buf;
-    uint64_t buf_dma_addr;
+	size_t buf_size;
+	u8 *buf;
+	uint64_t buf_dma_addr;
 
-    int index;
-    int irq;
-    int active;
-    void (*handler) (struct mqnic_eq_ring *);
+	int index;
+	int irq;
+	int active;
+	void (*handler) (struct mqnic_eq_ring *);
 
-    struct mqnic_if *interface;
+	struct mqnic_if *interface;
 
-    uint32_t hw_ptr_mask;
-    u8 *hw_addr;
-    u8 *hw_head_ptr;
-    u8 *hw_tail_ptr;
+	uint32_t hw_ptr_mask;
+	u8 *hw_addr;
+	u8 *hw_head_ptr;
+	u8 *hw_tail_ptr;
 };
 
 
@@ -698,45 +700,45 @@ struct mqnic_rx_queue {
 
 	// corundum
 	// written on enqueue (i.e. start_xmit)
-    u32 head_ptr;
-    u64 bytes;
-    u64 packets;
-    u64 dropped_packets;
-    //struct netdev_queue *tx_queue;
+	u32 head_ptr;
+	u64 bytes;
+	u64 packets;
+	u64 dropped_packets;
+	//struct netdev_queue *tx_queue;
 
-    // written from completion
-    u32 tail_ptr;
-    u32 clean_tail_ptr;
-    u64 ts_s;
-    u8 ts_valid;
+	// written from completion
+	u32 tail_ptr;
+	u32 clean_tail_ptr;
+	u64 ts_s;
+	u8 ts_valid;
 
-    // mostly constant
-    u32 size;
-    u32 full_size;
-    u32 size_mask;
-    u32 stride;
+	// mostly constant
+	u32 size;
+	u32 full_size;
+	u32 size_mask;
+	u32 stride;
 
-    u32 cpl_index;
+	u32 cpl_index;
 
-    u32 mtu;
-    u32 page_order;
+	u32 mtu;
+	u32 page_order;
 
-    u32 desc_block_size;
-    u32 log_desc_block_size;
+	u32 desc_block_size;
+	u32 log_desc_block_size;
 
-    size_t buf_size;
-    u8 *buf;
-    uint64_t buf_dma_addr;
+	size_t buf_size;
+	u8 *buf;
+	uint64_t buf_dma_addr;
 
-    union {
-        struct mqnic_tx_info *tx_info;
-        struct mqnic_rx_info *rx_info;
-    };
+	union {
+		struct mqnic_tx_info *tx_info;
+		struct mqnic_rx_info *rx_info;
+	};
 
-    u32 hw_ptr_mask;
-    u8 *hw_addr;
-    u8 *hw_head_ptr;
-    u8 *hw_tail_ptr;
+	u32 hw_ptr_mask;
+	u8 *hw_addr;
+	u8 *hw_head_ptr;
+	u8 *hw_tail_ptr;
 
 	struct mqnic_priv *priv;
 };
@@ -844,6 +846,27 @@ struct mqnic_reg_block *mqnic_find_reg_block(struct mqnic_reg_block *list, u32 t
 void mqnic_free_reg_block_list(struct mqnic_reg_block *list);
 
 /*
+ * Port manipulations
+ */
+void mqnic_all_ports_destroy(struct mqnic_if *interface);
+void mqnic_single_port_destroy(struct mqnic_port *port);
+
+/*
+ * Completion queue manipulations
+ */
+void mqnic_arm_cq(struct mqnic_cq_ring *ring);
+void mqnic_cpl_queue_release(struct mqnic_cq_ring *ring);
+
+
+/*
+ * Scheduler (block) queue manipulations
+ */
+void mqnic_destroy_sched_block(struct mqnic_sched_block **block_p);
+void mqnic_deactivate_sched_block(struct mqnic_sched_block *block);
+void mqnic_destroy_scheduler(struct mqnic_sched **sched_ptr);
+void mqnic_scheduler_disable(struct mqnic_sched *sched);
+
+/*
  * RX/TX IGB function prototypes
  */
 void eth_mqnic_tx_queue_release(void *txq);
@@ -851,6 +874,9 @@ void eth_mqnic_rx_queue_release(void *rxq);
 void mqnic_dev_clear_queues(struct rte_eth_dev *dev);
 void mqnic_dev_free_queues(struct rte_eth_dev *dev);
 void mqnic_dev_deactive_queues(struct rte_eth_dev *dev);
+
+u32 mqnic_port_get_tx_status(struct mqnic_port *port);
+u32 mqnic_port_get_rx_status(struct mqnic_port *port);
 
 uint64_t mqnic_get_rx_port_offloads_capa(struct rte_eth_dev *dev);
 uint64_t mqnic_get_rx_queue_offloads_capa(struct rte_eth_dev *dev);
@@ -949,9 +975,6 @@ struct mqnic_frag {
     uint64_t dma_addr;
     uint32_t len;
 };
-
-void mqnic_arm_cq(struct mqnic_cq_ring *ring);
-void mqnic_cpl_queue_release(struct mqnic_cq_ring *ring);
 
 
 #endif /* _MQNIC_ETHDEV_H_ */
