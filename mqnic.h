@@ -390,47 +390,76 @@ struct mqnic_port {
 	u32 port_features;
 };
 
+struct mqnic_sched_block {
+	struct mqnic_if *interface;
+
+	struct mqnic_reg_block *block_rb;
+	struct mqnic_reg_block *rb_list;
+
+	int index;
+
+	u32 tx_queue_count;
+
+	u32 sched_count;
+	struct mqnic_sched *sched[MQNIC_MAX_PORTS];
+};
+
+struct mqnic_sched {
+	struct mqnic_if *interface;
+	struct mqnic_sched_block *sched_block;
+
+	struct mqnic_reg_block *rb;
+
+	int index;
+
+	u32 type;
+	u32 offset;
+	u32 channel_count;
+	u32 channel_stride;
+
+	u8 *hw_addr;
+};
 
 struct mqnic_priv {
-    //spinlock_t stats_lock;
+	//spinlock_t stats_lock;
 
-    bool registered;
-    int port;
-    bool port_up;
+	bool registered;
+	int port;
+	bool port_up;
 
-    uint32_t if_id;
-    uint32_t if_features;
-    uint32_t event_queue_count;
-    uint32_t event_queue_offset;
-    uint32_t tx_queue_count;
-    uint32_t tx_queue_offset;
-    uint32_t tx_cpl_queue_count;
-    uint32_t tx_cpl_queue_offset;
-    uint32_t rx_queue_count;
-    uint32_t rx_queue_offset;
-    uint32_t rx_cpl_queue_count;
-    uint32_t rx_cpl_queue_offset;
-    uint32_t port_count;
-    uint32_t port_offset;
-    uint32_t port_stride;
+	uint32_t if_id;
+	uint32_t if_features;
+	uint32_t event_queue_count;
+	uint32_t event_queue_offset;
+	uint32_t tx_queue_count;
+	uint32_t tx_queue_offset;
+	uint32_t tx_cpl_queue_count;
+	uint32_t tx_cpl_queue_offset;
+	uint32_t rx_queue_count;
+	uint32_t rx_queue_offset;
+	uint32_t rx_cpl_queue_count;
+	uint32_t rx_cpl_queue_offset;
+	uint32_t port_count;
+	uint32_t port_offset;
+	uint32_t port_stride;
 
 	uint32_t desc_block_size;
-    uint32_t max_desc_block_size;
+	uint32_t max_desc_block_size;
 
 	uint64_t ipackets;  /**< Total number of successfully received packets. */
 	uint64_t opackets;  /**< Total number of successfully transmitted packets.*/
 	uint64_t ibytes;    /**< Total number of successfully received bytes. */
 	uint64_t obytes;    /**< Total number of successfully transmitted bytes. */
 
-    u8 *hw_addr;
-    u8 *csr_hw_addr;
+	u8 *hw_addr;
+	u8 *csr_hw_addr;
 
-    struct mqnic_eq_ring *event_ring[MQNIC_MAX_EVENT_RINGS];
-    struct mqnic_ring *tx_ring[MQNIC_MAX_TX_RINGS];
-    struct mqnic_cq_ring *tx_cpl_ring[MQNIC_MAX_TX_CPL_RINGS];
-    struct mqnic_ring *rx_ring[MQNIC_MAX_RX_RINGS];
-    struct mqnic_cq_ring *rx_cpl_ring[MQNIC_MAX_RX_CPL_RINGS];
-    struct mqnic_port *ports[MQNIC_MAX_PORTS];
+	struct mqnic_eq_ring *event_ring[MQNIC_MAX_EVENT_RINGS];
+	struct mqnic_ring *tx_ring[MQNIC_MAX_TX_RINGS];
+	struct mqnic_cq_ring *tx_cpl_ring[MQNIC_MAX_TX_CPL_RINGS];
+	struct mqnic_ring *rx_ring[MQNIC_MAX_RX_RINGS];
+	struct mqnic_cq_ring *rx_cpl_ring[MQNIC_MAX_RX_CPL_RINGS];
+	struct mqnic_port *ports[MQNIC_MAX_PORTS];
 };
 
 /*

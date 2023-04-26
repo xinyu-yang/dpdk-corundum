@@ -8,6 +8,8 @@
 #include "mqnic_logs.h"
 #include "mqnic_osdep.h"
 #include "mqnic_regs.h"
+#include "rte_ethdev_core.h"
+#include "rte_malloc.h"
 #include <infiniband/verbs.h>
 #include <stdint.h>
 
@@ -872,6 +874,142 @@ mqnic_all_port_deactivate(struct rte_eth_dev *dev)
 	return;
 }
 
+static int mqnic_sched_block_create(struct mqnic_if *interface) {
+	int ret = 0;
+	int i;
+	u32 offset;
+	struct mqnic_reg_block *sched_block_rb;
+	struct mqnic_sched_block *block;
+
+	for (i=0; i<interface->sched_block_count; i++) {
+		sched_block_rb = mqnic_find_reg_block(interface->rb_list,
+			MQNIC_RB_SCHED_BLOCK_TYPE, MQNIC_RB_SCHED_BLOCK_VER, i);
+		if (!sched_block_rb) {
+			ret = -EIO;
+			PMD_INIT_LOG(ERR, "Scheduler block index %d not found", i);
+		}
+
+		block = rte_zmalloc("scheduler block", sizeof(mqnic_sched_block), MQNIC_ALIGN);
+		if (!block) {
+			return -ENOMEM;
+		}
+
+		block->interface = interface;
+
+		block->index = i;
+		block->tx_queue_count = interface->tx_queue_count;
+		block->block_rb = sched_block_rb;
+		offset = MQNIC_DIRECT_READ_REG(sched_block_rb->regs, MQNIC_RB_SCHED_BLOCK_REG_OFFSET);
+
+		block->rb_list = mqnic_enumerate_reg_block_list(interface->hw_addr, offset, interface->hw_regs_size - offset);
+		if (!block->rb_list) {
+			ret = -EIO;
+			PMD_INIT_LOG(ERR, "Failed to enumerate blocks");
+			goto fail;
+		}
+
+		dev_info(dev, "Scheduler block-level register blocks:");
+		for (struct mqnic_reg_block *rb = block->rb_list; rb->regs; rb++)
+			PMD_INIT_LOG(INFO, " type 0x%08x (v %d.%d.%d.%d)", rb->type, rb->version >> 24,
+			(rb->version >> 16) & 0xff, (rb->version >> 8) & 0xff, rb->version & 0xff);
+
+		block->sched_count = 0;
+
+		for (struct mqnic_reg_block *rb = block->rb_list; rb->regs; rb++) {
+			if (rb->type == MQNIC_RB_SCHED_RR_TYPE && rb->version == MQNIC_RB_SCHED_RR_VER) {
+				ret = mqnic_scheduler_create(block, &block->sched[block->sched_count],
+						block->sched_count, rb);
+
+				if (ret)
+					goto fail;
+
+				block->sched_count++;
+			}
+		}
+	}
+
+	PMD_INIT_LOG(INFO, "Scheduler count: %d", block->sched_count);
+
+	mqnic_deactivate_sched_block(block);
+	return 0;
+
+fail:
+	mqnic_destroy_sched_block(block);
+	return ret;
+}
+
+static void mqnic_destroy_sched_block(struct mqnic_sched_block **block_p)
+{
+	int i;
+	struct mqnic_sched_block *block = *block_p;
+
+	mqnic_deactivate_sched_block(block);
+
+	for (i = 0; i < block->sched_count; i++)
+		if (block->sched[i])
+			mqnic_destroy_scheduler(&block->sched[i]);
+
+	if (block->rb_list)
+		mqnic_free_reg_block_list(block->rb_list);
+
+	*block_p = NULL;
+	rte_free(block);
+}
+
+static void mqnic_deactivate_sched_block(struct mqnic_sched_block *block)
+{
+	int i;
+
+	// disable schedulers
+	for (i = 0; i < block->sched_count; i++)
+		if (block->sched[i])
+			mqnic_scheduler_disable(block->sched[i]);
+}
+
+static int mqnic_scheduler_create(struct mqnic_sched_block *block, struct mqnic_sched **sched_p, int idx, struct mqnic_sched_block *rb) {
+	struct mqnic_if *interface = block->interface;
+	struct mqnic_sched *sched = rte_zmalloc("mqnic scheduler", sizeof(mqnic_sched), MQNIC_ALIGN);
+	if (!sched) {
+		return -ENOMEM;
+	}
+
+	sched->interface = interface;
+	sched->sched_block = block;
+
+	sched->index = idx;
+	sched->rb = rb;
+	sched->type = rb->type;
+	sched->offset = MQNIC_DIRECT_READ_REG(rb->regs, MQNIC_RB_SCHED_RR_REG_OFFSET);
+	sched->channel_count = MQNIC_DIRECT_READ_REG(rb->regs, MQNIC_RB_SCHED_RR_REG_CH_COUNT);
+	sched->channel_stride = MQNIC_DIRECT_READ_REG(rb->regs, MQNIC_RB_SCHED_RR_REG_CH_STRIDE);
+
+	sched->hw_addr = block->interface->hw_addr + sched->offset;
+
+	PMD_INIT_LOG(INFO, "Scheduler type: 0x%08x", sched->type);
+	PMD_INIT_LOG(INFO, "Scheduler offset: 0x%08x", sched->offset);
+	PMD_INIT_LOG(INFO, "Scheduler channel count: %d", sched->channel_count);
+	PMD_INIT_LOG(INFO, "Scheduler channel stride: 0x%08x", sched->channel_stride);
+
+	mqnic_scheduler_disable(sched);
+
+	*sched_p = sched;
+}
+
+void mqnic_destroy_scheduler(struct mqnic_sched **sched_ptr)
+{
+	struct mqnic_sched *sched = *sched_ptr;
+	*sched_ptr = NULL;
+
+	mqnic_scheduler_disable(sched);
+
+	rte_free(sched);
+}
+
+void mqnic_scheduler_disable(struct mqnic_sched *sched)
+{
+	MQNIC_DIRECT_WRITE_REG(sched->rb->regs, MQNIC_RB_SCHED_RR_REG_CTRL, 0);
+}
+
 static int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 	int ret = 0;
 	u32 i = 0;
@@ -1048,6 +1186,9 @@ static int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 
 	// Create ports
 	mqnic_all_ports_create(interface);
+	
+	// Create schedulers
+	mqnic_sched_block_create(interface);
 
 	hw->interface[idx] = interface;
 
