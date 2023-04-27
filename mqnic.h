@@ -264,9 +264,10 @@ struct mqnic_mac_info {
 	bool tx_pkt_filtering;
 };
 
+
 struct mqnic_hw {
 	void *back;
-	struct rte_eth_dev *dev;
+	//struct rte_eth_dev *dev;
 
 	u8 *flash_address;
 	unsigned long io_base;
@@ -372,9 +373,6 @@ struct mqnic_if {
 	u8 *hw_addr;
 	u8 *csr_hw_addr;
 
-	u32 ndev_count;
-	struct net_device *ndev[MQNIC_MAX_PORTS];
-
 	struct i2c_client *mod_i2c_client;
 };
 
@@ -467,7 +465,7 @@ struct mqnic_priv {
  */
 struct mqnic_adapter {
 	struct mqnic_hw hw;
-	struct mqnic_priv priv;
+	//struct mqnic_priv priv;
 	//struct mqnic_hw_stats   stats;
 	//struct mqnic_interrupt  intr;
 	//struct mqnic_filter_info filter;
@@ -719,6 +717,7 @@ struct mqnic_rx_queue {
 	u32 stride;
 
 	u32 cpl_index;
+	struct mqnic_cq_ring *cq_ring;
 
 	u32 mtu;
 	u32 page_order;
@@ -730,10 +729,7 @@ struct mqnic_rx_queue {
 	u8 *buf;
 	uint64_t buf_dma_addr;
 
-	union {
-		struct mqnic_tx_info *tx_info;
-		struct mqnic_rx_info *rx_info;
-	};
+	struct mqnic_rx_info *rx_info;
 
 	u32 hw_ptr_mask;
 	u8 *hw_addr;
@@ -741,6 +737,7 @@ struct mqnic_rx_queue {
 	u8 *hw_tail_ptr;
 
 	struct mqnic_priv *priv;
+	struct mqnic_hw *hw;
 };
 
 /**
@@ -771,45 +768,42 @@ struct mqnic_tx_queue {
 
 	//mqnic
 	// written on enqueue (i.e. start_xmit)
-    uint32_t head_ptr;
-    uint64_t bytes;
-    uint64_t packets;
-    uint64_t dropped_packets;
-    struct netdev_queue *tx_queue;
+	uint32_t head_ptr;
+	uint64_t bytes;
+	uint64_t packets;
+	uint64_t dropped_packets;
+	struct netdev_queue *tx_queue;
 
-    // written from completion
-    uint32_t tail_ptr; // ____cacheline_aligned_in_smp;
-    uint32_t clean_tail_ptr;
-    uint64_t ts_s;
-    uint8_t ts_valid;
+	// written from completion
+	uint32_t tail_ptr; // ____cacheline_aligned_in_smp;
+	uint32_t clean_tail_ptr;
+	uint64_t ts_s;
+	uint8_t ts_valid;
 
-    // mostly constant
-    uint32_t size;  //number of desc
-    uint32_t full_size;
-    uint32_t size_mask;
-    uint32_t stride;
+	// mostly constant
+	uint32_t size;  //number of desc
+	uint32_t full_size;
+	uint32_t size_mask;
+	uint32_t stride;
 
-    uint32_t cpl_index;
+	uint32_t cpl_index;
 
-    uint32_t mtu;
-    uint32_t page_order;
+	uint32_t mtu;
+	uint32_t page_order;
 
-    uint32_t desc_block_size;
-    uint32_t log_desc_block_size;
+	uint32_t desc_block_size;
+	uint32_t log_desc_block_size;
 
-    size_t buf_size;
-    uint8_t *buf;
-    //dma_addr_t buf_dma_addr;
+	size_t buf_size;
+	uint8_t *buf;
+	//dma_addr_t buf_dma_addr;
 
-    union {
-        struct mqnic_tx_info *tx_info;
-        struct mqnic_rx_info *rx_info;
-    };
+	struct mqnic_tx_info *tx_info;
 
-    uint32_t hw_ptr_mask;
-    uint8_t *hw_addr;
-    uint8_t *hw_head_ptr;
-    uint8_t *hw_tail_ptr;
+	uint32_t hw_ptr_mask;
+	uint8_t *hw_addr;
+	uint8_t *hw_head_ptr;
+	uint8_t *hw_tail_ptr;
 
 	struct mqnic_priv *priv;
 };
@@ -837,6 +831,11 @@ struct mqnic_tx_queue {
 #define IGB_TSO_MAX_HDRLEN			(512)
 #define IGB_TSO_MAX_MSS				(9216)
 
+
+/*
+ * Create interface
+ */
+int mqnic_create_if(struct rte_eth_dev *dev, int idx);
 
 /*
  * Register block manipulations

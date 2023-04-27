@@ -33,15 +33,15 @@ mqnic_activate_rxq(struct mqnic_rx_queue *rxq, int cpl_index)
 	rxq->cpl_index = cpl_index;
 	// deactivate queue
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
-    // set base address
+	// set base address
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_BASE_ADDR_REG+0, rxq->rx_ring_phys_addr);
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_BASE_ADDR_REG+4, rxq->rx_ring_phys_addr >> 32);
-    // set completion queue index
+	// set completion queue index
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_CPL_QUEUE_INDEX_REG, rxq->cpl_index);
-    // set pointers
+	// set pointers
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_HEAD_PTR_REG, rxq->head_ptr & rxq->hw_ptr_mask);
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_TAIL_PTR_REG, rxq->tail_ptr & rxq->hw_ptr_mask);
-    // set size and activate queue
+	// set size and activate queue
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(rxq->size) | (rxq->log_desc_block_size << 8) | MQNIC_QUEUE_ACTIVE_MASK);
     return 0;
 }
@@ -1023,14 +1023,13 @@ mqnic_alloc_rx_queue_mbufs(struct mqnic_rx_queue *rxq)
 	for (i = 0; i < rxq->nb_rx_desc; i++) {
 		volatile struct mqnic_desc *rxd;
 		struct rte_mbuf *mbuf = rte_mbuf_raw_alloc(rxq->mb_pool);
-
 		if (mbuf == NULL) {
 			PMD_INIT_LOG(ERR, "RX mbuf alloc failed "
 				     "queue_id=%hu", rxq->queue_id);
 			return -ENOMEM;
 		}
-		dma_addr =
-			rte_cpu_to_le_64(rte_mbuf_data_iova_default(mbuf));
+
+		dma_addr = rte_cpu_to_le_64(rte_mbuf_data_iova_default(mbuf));
 		rxd = &rxq->rx_ring[i];
 		rxd->len = mbuf->buf_len; //right????????
 		rxd->addr = dma_addr;
@@ -1053,8 +1052,7 @@ eth_mqnic_rx_init(struct rte_eth_dev *dev)
 	struct mqnic_rx_queue *rxq;
 	uint16_t i;
 	int ret;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct mqnic_hw *hw = MQNIC_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "eth_mqnic_rx_init");
 
@@ -1068,7 +1066,7 @@ eth_mqnic_rx_init(struct rte_eth_dev *dev)
 		}
 
 		rxq->flags = 0;
-		rxq->priv = priv;
+		rxq->hw = hw;
 
 		/* Allocate buffers for descriptor rings and set up queue */
 		ret = mqnic_alloc_rx_queue_mbufs(rxq);
@@ -1076,7 +1074,7 @@ eth_mqnic_rx_init(struct rte_eth_dev *dev)
 			return ret;
 
 		mqnic_activate_rxq(rxq, i);
-		MQNIC_WRITE_FLUSH(priv);
+		MQNIC_WRITE_FLUSH(hw);
 	}
 
 	if (dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_SCATTER) {

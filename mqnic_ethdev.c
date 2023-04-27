@@ -671,7 +671,7 @@ mqnic_determine_desc_block_size(struct mqnic_if *interface)
 
 static void mqnic_deactivate_scheduler(struct mqnic_sched *sched)
 {
-    // disable schedulers
+	// disable schedulers
 	MQNIC_DIRECT_WRITE_REG(sched->rb->regs, MQNIC_RB_SCHED_RR_REG_CTRL, 0);
 }
 
@@ -1287,10 +1287,10 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 		goto fail_if_rb;
 	}
 
-	hw->if_offset = MQNIC_DIRECT_READ_REG(hw->if_rb, MQNIC_RB_IF_REG_OFFSET);
-	hw->if_count = MQNIC_DIRECT_READ_REG(hw->if_rb, MQNIC_RB_IF_REG_COUNT);
-	hw->if_stride = MQNIC_DIRECT_READ_REG(hw->if_rb, MQNIC_RB_IF_REG_STRIDE);
-	hw->if_csr_offset = MQNIC_DIRECT_READ_REG(hw->if_rb, MQNIC_RB_IF_REG_CSR_OFFSET);
+	hw->if_offset = MQNIC_DIRECT_READ_REG(hw->if_rb->regs, MQNIC_RB_IF_REG_OFFSET);
+	hw->if_count = MQNIC_DIRECT_READ_REG(hw->if_rb->regs, MQNIC_RB_IF_REG_COUNT);
+	hw->if_stride = MQNIC_DIRECT_READ_REG(hw->if_rb->regs, MQNIC_RB_IF_REG_STRIDE);
+	hw->if_csr_offset = MQNIC_DIRECT_READ_REG(hw->if_rb->regs, MQNIC_RB_IF_REG_CSR_OFFSET);
 	if (hw->if_count > MQNIC_MAX_IF)
 		hw->if_count = MQNIC_MAX_IF;
 
@@ -1444,7 +1444,6 @@ static int eth_mqnic_start(struct rte_eth_dev *dev)
 
 		mqnic_tx_cpl_queue_active(interface);
 		eth_mqnic_tx_init(dev);
-
 	}
 
 	mqnic_set_interface_mtu(dev, 1500);
@@ -1711,10 +1710,6 @@ eth_mqnic_mtu_set(struct rte_eth_dev *dev, uint16_t mtu)
 	return 0;
 }
 
-RTE_PMD_REGISTER_PCI(net_mqnic_igb, rte_mqnic_pmd);
-RTE_PMD_REGISTER_PCI_TABLE(net_mqnic_igb, pci_id_mqnic_map);
-RTE_PMD_REGISTER_KMOD_DEP(net_mqnic_igb, "* uio_pci_generic | vfio");
-
 /* see mqnic_logs.c */
 RTE_INIT(mqnic_init_log)
 {
@@ -1730,3 +1725,7 @@ u32 mqnic_port_get_rx_status(struct mqnic_port *port)
 {
 	return MQNIC_DIRECT_READ_REG(port->port_ctrl_rb->regs, MQNIC_RB_PORT_CTRL_REG_RX_STATUS);
 }
+
+RTE_PMD_REGISTER_PCI(net_mqnic_igb, rte_mqnic_pmd);
+RTE_PMD_REGISTER_PCI_TABLE(net_mqnic_igb, pci_id_mqnic_map);
+RTE_PMD_REGISTER_KMOD_DEP(net_mqnic_igb, "* uio_pci_generic | vfio");
