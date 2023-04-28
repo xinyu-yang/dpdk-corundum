@@ -265,9 +265,10 @@ struct mqnic_mac_info {
 };
 
 
+// The top-level struct of corundum
 struct mqnic_hw {
 	void *back;
-	//struct rte_eth_dev *dev;
+	struct rte_eth_dev *dev; /*For one-to-one pci and eth_dev mapping*/
 
 	u8 *flash_address;
 	unsigned long io_base;
@@ -372,6 +373,10 @@ struct mqnic_if {
 	size_t hw_regs_size;
 	u8 *hw_addr;
 	u8 *csr_hw_addr;
+
+	/*Only one for current mapping*/
+	u32 dev_count;
+	struct rte_eth_dev *eth_dev[MQNIC_MAX_PORTS];
 
 	struct i2c_client *mod_i2c_client;
 };

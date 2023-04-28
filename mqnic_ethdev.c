@@ -148,13 +148,10 @@ mqnic_event_queue_release(struct mqnic_eq_ring *ring)
 }
 
 static int
-mqnic_all_event_queue_create(struct mqnic_if *interface, int socket_id)
+mqnic_all_event_queue_create(struct mqnic_if *interface)
 {
-	const struct rte_memzone *tz;
 	struct mqnic_eq_ring *ring;
 	uint32_t i;
-	struct rte_eth_dev *dev = interface->hw->dev;
-	struct mqnic_hw *hw = interface->hw;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_all_event_queue_create");
 
@@ -166,7 +163,6 @@ mqnic_all_event_queue_create(struct mqnic_if *interface, int socket_id)
 			interface->event_ring[i] = NULL;
 		}
 
-		/* allocate the event queue data structure */
 		// Create event queue
 		ring = rte_zmalloc("ethdev event queue", sizeof(struct mqnic_eq_ring),
 							RTE_CACHE_LINE_SIZE);
@@ -194,6 +190,32 @@ mqnic_all_event_queue_create(struct mqnic_if *interface, int socket_id)
 		// Deactivate queue
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
 
+		interface->event_ring[i] = ring;
+	}
+
+	MQNIC_WRITE_FLUSH(interface);
+
+	return 0;
+}
+
+static int
+mqnic_all_event_queue_alloc(struct mqnic_if *interface, int socket_id)
+{
+	const struct rte_memzone *tz;
+	struct mqnic_eq_ring *ring;
+	uint32_t i;
+	struct rte_eth_dev *dev = interface->hw->dev;
+	
+	PMD_INIT_LOG(DEBUG, "mqnic_all_event_queue_create");
+
+	for (i = 0; i < interface->event_queue_count; i++){
+		/* Free memory prior to re-allocation if needed */
+		if (interface->event_ring[i]->buf != NULL) {
+			return -EINVAL;
+		}
+
+		ring = interface->event_ring[i];
+
 		// Allocate event queue
 		ring->size = roundup_pow_of_two(event_queue_size);
 		ring->size_mask = ring->size - 1;
@@ -209,9 +231,6 @@ mqnic_all_event_queue_create(struct mqnic_if *interface, int socket_id)
 		}
 		ring->buf = (u8*)tz->addr;
 		ring->buf_dma_addr = tz->iova;
-
-
-		interface->event_ring[i] = ring;
 	}
 
 	MQNIC_WRITE_FLUSH(interface);
@@ -451,12 +470,11 @@ mqnic_init_cpl_queue_registers(struct mqnic_cq_ring *ring)
 }
 
 static int
-mqnic_tx_cpl_queue_create(struct mqnic_if *interface, int socket_id)
+mqnic_tx_cpl_queue_create(struct mqnic_if *interface)
 {
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
 	struct mqnic_hw *hw = interface->hw;
-	struct rte_eth_dev *dev = hw->dev;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_tx_cpl_queue_create");
 
@@ -479,8 +497,34 @@ mqnic_tx_cpl_queue_create(struct mqnic_if *interface, int socket_id)
 		// Create completion queue
 		_create_cpl_queue(ring, interface, i);
 
+		interface->tx_cpl_ring[i] = ring;
+	}
+
+	MQNIC_WRITE_FLUSH(interface);
+	return 0;
+}
+
+
+static int
+mqnic_tx_cpl_queue_alloc(struct mqnic_if *interface, int socket_id)
+{
+	struct mqnic_cq_ring *ring;
+	uint32_t i;
+	int ret;
+	struct mqnic_hw *hw = interface->hw;
+	struct rte_eth_dev *dev = hw->dev;
+	
+	PMD_INIT_LOG(DEBUG, "mqnic_tx_cpl_queue_create");
+
+	for (i = 0; i < interface->tx_cpl_queue_count; i++){
+		// Release existing buffers if have
+		if (interface->tx_cpl_ring[i]->buf != NULL) {
+			return -EINVAL;
+		}
+
+		ring = interface->tx_cpl_ring[i];
+
 		// Allocate completion queue buffer
-		int ret;
 		if ((ret = _alloc_cpl_queue(ring, dev, i, socket_id)))
 			return ret;
 
@@ -548,12 +592,10 @@ mqnic_tx_cpl_queue_deactivate(struct mqnic_if *interface)
 }
 
 static int
-mqnic_rx_cpl_queue_create(struct mqnic_if *interface, int socket_id)
+mqnic_rx_cpl_queue_create(struct mqnic_if *interface)
 {
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
-	struct mqnic_hw *hw = interface->hw;
-	struct rte_eth_dev *dev = hw->dev;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_rx_cpl_queue_create");
 
@@ -576,15 +618,39 @@ mqnic_rx_cpl_queue_create(struct mqnic_if *interface, int socket_id)
 		// Create completion queue
 		_create_cpl_queue(ring, interface, i);
 
+		interface->rx_cpl_ring[i] = ring;
+	}
+
+	MQNIC_WRITE_FLUSH(interface);
+	return 0;
+}
+
+static int
+mqnic_rx_cpl_queue_alloc(struct mqnic_if *interface, int socket_id)
+{
+	struct mqnic_cq_ring *ring;
+	uint32_t i;
+	int ret;
+	struct mqnic_hw *hw = interface->hw;
+	struct rte_eth_dev *dev = hw->dev;
+	
+	PMD_INIT_LOG(DEBUG, "mqnic_rx_cpl_queue_create");
+
+	for (i = 0; i < interface->rx_cpl_queue_count; i++){
+		/* Free memory prior to re-allocation if needed */
+		if (interface->rx_cpl_ring[i]->buf != NULL) {
+			return -EINVAL;
+		}
+
+		/* allocate the event queue data structure */
+		ring = interface->rx_cpl_ring[i];
+
 		// Allocate completion queue buffer
-		int ret;
 		if ((ret = _alloc_cpl_queue(ring, dev, i, socket_id)))
 			return ret;
 
 		// Write settings into hardware
 		mqnic_init_cpl_queue_registers(ring);
-
-		interface->rx_cpl_ring[i] = ring;
 	}
 
 	MQNIC_WRITE_FLUSH(interface);
@@ -1146,15 +1212,26 @@ int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 	desc_block_size = mqnic_determine_desc_block_size(interface);
 
 	// Create rings
-	mqnic_all_event_queue_create(interface, 0);
-	mqnic_tx_cpl_queue_create(interface, 0);
-	mqnic_rx_cpl_queue_create(interface, 0);
+	mqnic_all_event_queue_create(interface);
+	mqnic_tx_cpl_queue_create(interface);
+	mqnic_rx_cpl_queue_create(interface);
 
 	// Create ports
 	mqnic_all_ports_create(interface);
 	
 	// Create schedulers
 	mqnic_sched_block_create(interface);
+
+	// Create net device.
+	// Currently, there is only one device.
+	// TODO: multiple devices
+	interface->dev_count = 1;
+	interface->eth_dev[0] = hw->dev;
+	for (i = 0; i < interface->dev_count; i++) {
+		ret = mqnic_ethdev_create(interface, &interface->eth_dev[i], i);
+		if (ret)
+			goto fail;
+	}
 
 	hw->interface[idx] = interface;
 
