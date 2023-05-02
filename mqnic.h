@@ -343,7 +343,7 @@ struct mqnic_if {
 	struct mqnic_eq_ring *event_ring[MQNIC_MAX_EVENT_RINGS];
 
 	u32 tx_queue_offset;
-	u32 tx_queue_count;
+	u32 tx_queue_count; /*Queue count is controled by dpdk apps*/
 	u32 tx_queue_stride;
 	struct mqnic_ring *tx_ring[MQNIC_MAX_TX_RINGS];
 
@@ -353,7 +353,7 @@ struct mqnic_if {
 	struct mqnic_cq_ring *tx_cpl_ring[MQNIC_MAX_TX_CPL_RINGS];
 
 	u32 rx_queue_offset;
-	u32 rx_queue_count;
+	u32 rx_queue_count; /*Queue count is controled by dpdk apps*/
 	u32 rx_queue_stride;
 	struct mqnic_ring *rx_ring[MQNIC_MAX_RX_RINGS];
 
@@ -423,61 +423,50 @@ struct mqnic_sched {
 	u8 *hw_addr;
 };
 
-struct mqnic_priv {
-	//spinlock_t stats_lock;
-
-	bool registered;
-	int port;
-	bool port_up;
-
-	uint32_t if_id;
-	uint32_t if_features;
-	uint32_t event_queue_count;
-	uint32_t event_queue_offset;
-	uint32_t tx_queue_count;
-	uint32_t tx_queue_offset;
-	uint32_t tx_cpl_queue_count;
-	uint32_t tx_cpl_queue_offset;
-	uint32_t rx_queue_count;
-	uint32_t rx_queue_offset;
-	uint32_t rx_cpl_queue_count;
-	uint32_t rx_cpl_queue_offset;
-	uint32_t port_count;
-	uint32_t port_offset;
-	uint32_t port_stride;
-
-	uint32_t desc_block_size;
-	uint32_t max_desc_block_size;
-
-	uint64_t ipackets;  /**< Total number of successfully received packets. */
-	uint64_t opackets;  /**< Total number of successfully transmitted packets.*/
-	uint64_t ibytes;    /**< Total number of successfully received bytes. */
-	uint64_t obytes;    /**< Total number of successfully transmitted bytes. */
-
-	u8 *hw_addr;
-	u8 *csr_hw_addr;
-
-	struct mqnic_eq_ring *event_ring[MQNIC_MAX_EVENT_RINGS];
-	struct mqnic_ring *tx_ring[MQNIC_MAX_TX_RINGS];
-	struct mqnic_cq_ring *tx_cpl_ring[MQNIC_MAX_TX_CPL_RINGS];
-	struct mqnic_ring *rx_ring[MQNIC_MAX_RX_RINGS];
-	struct mqnic_cq_ring *rx_cpl_ring[MQNIC_MAX_RX_CPL_RINGS];
-	struct mqnic_port *ports[MQNIC_MAX_PORTS];
-};
 
 /*
  * Structure to store private data for each driver instance (for each port).
  */
 struct mqnic_adapter {
 	struct mqnic_hw hw;
-	//struct mqnic_priv priv;
-	//struct mqnic_hw_stats   stats;
-	//struct mqnic_interrupt  intr;
-	//struct mqnic_filter_info filter;
+
 	bool stopped;
-	//struct rte_timecounter  systime_tc;
-	//struct rte_timecounter  rx_tstamp_tc;
-	//struct rte_timecounter  tx_tstamp_tc;
+
+	struct rte_eth_dev *dev;
+	struct mqnic_if *interface;
+
+	int index;
+	bool registered;
+	bool port_up;
+
+	u32 if_features;
+
+	u32 event_queue_count;
+	struct mqnic_eq_ring *event_ring[MQNIC_MAX_EVENT_RINGS];
+
+	u32 tx_queue_count;
+	struct mqnic_ring *tx_ring[MQNIC_MAX_TX_RINGS];
+
+	u32 tx_cpl_queue_count;
+	struct mqnic_cq_ring *tx_cpl_ring[MQNIC_MAX_TX_CPL_RINGS];
+
+	u32 rx_queue_count;
+	struct mqnic_ring *rx_ring[MQNIC_MAX_RX_RINGS];
+
+	u32 rx_cpl_queue_count;
+	struct mqnic_cq_ring *rx_cpl_ring[MQNIC_MAX_RX_CPL_RINGS];
+
+	u32 sched_block_count;
+	struct mqnic_sched_block *sched_block[MQNIC_MAX_PORTS];
+
+	u32 max_desc_block_size;
+
+	struct i2c_client *mod_i2c_client;
+
+	uint64_t ipackets;  /**< Total number of successfully received packets. */
+	uint64_t opackets;  /**< Total number of successfully transmitted packets.*/
+	uint64_t ibytes;    /**< Total number of successfully received bytes. */
+	uint64_t obytes;    /**< Total number of successfully transmitted bytes. */
 };
 
 struct mqnic_desc {
@@ -841,6 +830,12 @@ struct mqnic_tx_queue {
  * Create interface
  */
 int mqnic_create_if(struct rte_eth_dev *dev, int idx);
+
+
+/*
+ * Create interface
+ */
+void mqnic_netdev_destroy(struct rte_eth_dev *dev);
 
 /*
  * Register block manipulations

@@ -506,23 +506,22 @@ mqnic_tx_cpl_queue_create(struct mqnic_if *interface)
 
 
 static int
-mqnic_tx_cpl_queue_alloc(struct mqnic_if *interface, int socket_id)
+mqnic_tx_cpl_queue_alloc(struct rte_eth_dev *dev, int socket_id)
 {
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
 	int ret;
-	struct mqnic_hw *hw = interface->hw;
-	struct rte_eth_dev *dev = hw->dev;
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_tx_cpl_queue_create");
 
-	for (i = 0; i < interface->tx_cpl_queue_count; i++){
+	for (i = 0; i < adapter->tx_cpl_queue_count; i++){
 		// Release existing buffers if have
-		if (interface->tx_cpl_ring[i]->buf != NULL) {
+		if (adapter->tx_cpl_ring[i]->buf != NULL) {
 			return -EINVAL;
 		}
 
-		ring = interface->tx_cpl_ring[i];
+		ring = adapter->tx_cpl_ring[i];
 
 		// Allocate completion queue buffer
 		if ((ret = _alloc_cpl_queue(ring, dev, i, socket_id)))
@@ -530,36 +529,34 @@ mqnic_tx_cpl_queue_alloc(struct mqnic_if *interface, int socket_id)
 
 		// Write settings into hardware
 		mqnic_init_cpl_queue_registers(ring);
-
-		interface->tx_cpl_ring[i] = ring;
 	}
 
-	MQNIC_WRITE_FLUSH(interface);
+	MQNIC_WRITE_FLUSH(ring);
 	return 0;
 }
 
 static void
-mqnic_tx_cpl_queue_destroy(struct mqnic_if *interface)
+mqnic_tx_cpl_queue_destroy(struct rte_eth_dev *dev)
 {
 	//const struct rte_memzone *tz;
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
-	struct rte_eth_dev *dev = interface->hw->dev;
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_tx_cpl_queue_destroy");
 
-	for (i = 0; i < interface->tx_cpl_queue_count; i++){
+	for (i = 0; i < adapter->tx_cpl_queue_count; i++){
 
-		if (interface->tx_cpl_ring[i] != NULL) {
-			ring = interface->tx_cpl_ring[i];
+		if (adapter->tx_cpl_ring[i] != NULL) {
+			ring = adapter->tx_cpl_ring[i];
 			// deactivate queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size));
     		// disarm queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, ring->eq_index);
-			MQNIC_WRITE_FLUSH(interface);
+			MQNIC_WRITE_FLUSH(ring);
 			PMD_INIT_LOG(DEBUG, "release tx cpl ring %d", i);
 			mqnic_cpl_queue_release(ring);
-			interface->tx_cpl_ring[i] = NULL;
+			adapter->tx_cpl_ring[i] = NULL;
 		}
 
 		rte_eth_dma_zone_free(dev, "tx_cq_ring", i);
@@ -626,24 +623,23 @@ mqnic_rx_cpl_queue_create(struct mqnic_if *interface)
 }
 
 static int
-mqnic_rx_cpl_queue_alloc(struct mqnic_if *interface, int socket_id)
+mqnic_rx_cpl_queue_alloc(struct rte_eth_dev *dev, int socket_id)
 {
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
 	int ret;
-	struct mqnic_hw *hw = interface->hw;
-	struct rte_eth_dev *dev = hw->dev;
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_rx_cpl_queue_create");
 
-	for (i = 0; i < interface->rx_cpl_queue_count; i++){
+	for (i = 0; i < adapter->rx_cpl_queue_count; i++){
 		/* Free memory prior to re-allocation if needed */
-		if (interface->rx_cpl_ring[i]->buf != NULL) {
+		if (adapter->rx_cpl_ring[i]->buf != NULL) {
 			return -EINVAL;
 		}
 
 		/* allocate the event queue data structure */
-		ring = interface->rx_cpl_ring[i];
+		ring = adapter->rx_cpl_ring[i];
 
 		// Allocate completion queue buffer
 		if ((ret = _alloc_cpl_queue(ring, dev, i, socket_id)))
@@ -653,32 +649,32 @@ mqnic_rx_cpl_queue_alloc(struct mqnic_if *interface, int socket_id)
 		mqnic_init_cpl_queue_registers(ring);
 	}
 
-	MQNIC_WRITE_FLUSH(interface);
+	MQNIC_WRITE_FLUSH(ring);
 	return 0;
 }
 
 static void
-mqnic_rx_cpl_queue_destroy(struct mqnic_if *interface)
+mqnic_rx_cpl_queue_destroy(struct rte_eth_dev *dev)
 {
 	//const struct rte_memzone *tz;
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
-	struct rte_eth_dev *dev = interface->hw->dev;
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_rx_cpl_queue_destroy");
 
-	for (i = 0; i < interface->rx_cpl_queue_count; i++){
+	for (i = 0; i < adapter->rx_cpl_queue_count; i++){
 		/* Free memory prior to re-allocation if needed */
-		if (interface->rx_cpl_ring[i] != NULL) {
-			ring = interface->rx_cpl_ring[i];
+		if (adapter->rx_cpl_ring[i] != NULL) {
+			ring = adapter->rx_cpl_ring[i];
 			// deactivate queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size));
 			// disarm queue
 			MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, ring->eq_index);
-			MQNIC_WRITE_FLUSH(interface);
+			MQNIC_WRITE_FLUSH(ring);
 			PMD_INIT_LOG(DEBUG, "release rx cpl ring %d", i);
 			mqnic_cpl_queue_release(ring);
-			interface->rx_cpl_ring[i] = NULL;
+			adapter->rx_cpl_ring[i] = NULL;
 		}
 
 		rte_eth_dma_zone_free(dev, "rx_cq_ring", i);
@@ -1042,6 +1038,62 @@ void mqnic_scheduler_disable(struct mqnic_sched *sched)
 	MQNIC_DIRECT_WRITE_REG(sched->rb->regs, MQNIC_RB_SCHED_RR_REG_CTRL, 0);
 }
 
+
+int mqnic_ethdev_create(struct mqnic_if *interface, int idx) {
+	int ret = 0;
+	u32 i;
+	struct rte_eth_dev *dev = interface->eth_dev[idx];
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
+	if (dev == NULL)
+		return -EINVAL;
+
+	adapter->dev = dev;
+	adapter->interface = interface;
+	adapter->index = idx;
+	adapter->port_up = false;
+
+	adapter->if_features = interface->if_features;
+
+	adapter->event_queue_count = interface->event_queue_count;
+	for (i=0; i<adapter->event_queue_count; i++)
+		adapter->event_ring[i] = interface->event_ring[i];
+
+	adapter->tx_cpl_queue_count = interface->tx_cpl_queue_count;
+	for (i=0; i<adapter->tx_cpl_queue_count; i++)
+		adapter->tx_cpl_ring[i] = interface->tx_cpl_ring[i];
+
+	adapter->rx_cpl_queue_count = interface->rx_cpl_queue_count;
+	for (i=0; i<adapter->rx_cpl_queue_count; i++)
+		adapter->rx_cpl_ring[i] = interface->rx_cpl_ring[i];
+
+	// dpdk device->data has its own queue structure
+	// The rx/tx queue number is set by dpdk apps
+	/*dev->data->nb_rx_queues = interface->rx_queue_count;*/
+
+	// Alloc completion queue buffers
+	ret = mqnic_tx_cpl_queue_alloc(dev, 0);
+	if (ret)
+		goto fail;
+
+	ret = mqnic_rx_cpl_queue_alloc(dev, 0);
+	if (ret)
+		goto fail;
+
+
+fail:
+	mqnic_netdev_destroy(dev);
+
+	return ret;
+}
+
+// TODO: free dev?
+void mqnic_netdev_destroy(struct rte_eth_dev *dev) {
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
+	mqnic_tx_cpl_queue_destroy(dev);
+	mqnic_rx_cpl_queue_destroy(dev);
+}
+
+
 int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 	int ret = 0;
 	u32 i = 0;
@@ -1210,6 +1262,7 @@ int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 
 	// Determine description block size
 	desc_block_size = mqnic_determine_desc_block_size(interface);
+	PMD_INIT_LOG(INFO, "Descriptor block size is: %d", desc_block_size);
 
 	// Create rings
 	mqnic_all_event_queue_create(interface);
@@ -1228,7 +1281,7 @@ int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 	interface->dev_count = 1;
 	interface->eth_dev[0] = hw->dev;
 	for (i = 0; i < interface->dev_count; i++) {
-		ret = mqnic_ethdev_create(interface, &interface->eth_dev[i], i);
+		ret = mqnic_ethdev_create(interface, i);
 		if (ret)
 			goto fail;
 	}
@@ -1302,10 +1355,8 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 	int error = 0;
 	struct mqnic_reg_block *rb;
 	struct rte_pci_device *pci_dev = RTE_ETH_DEV_TO_PCI(eth_dev);
-	struct mqnic_hw *hw =
-		MQNIC_DEV_PRIVATE_TO_HW(eth_dev->data->dev_private);
-	struct mqnic_adapter *adapter =
-		MQNIC_DEV_PRIVATE(eth_dev->data->dev_private);
+	struct mqnic_hw *hw = MQNIC_DEV_PRIVATE_TO_HW(eth_dev->data->dev_private);
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(eth_dev->data->dev_private);
 
 	eth_dev->dev_ops = &eth_mqnic_ops;
 	eth_dev->rx_pkt_burst = &eth_mqnic_recv_pkts;
@@ -1393,7 +1444,6 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 			goto fail_create_if;
 		}
 	}
-
 
 	/* Read the permanent MAC address out of the EEPROM */
 	if (mqnic_read_mac_addr(hw) != 0) {
@@ -1667,6 +1717,7 @@ eth_mqnic_stats_reset(struct rte_eth_dev *dev)
 	return 0;
 }
 
+// TODO: Set default rx/tx queue sizes
 static int
 eth_mqnic_infos_get(struct rte_eth_dev *dev, struct rte_eth_dev_info *dev_info)
 {
