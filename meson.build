@@ -3,6 +3,7 @@
 
 sources = files(
 	'mqnic_logs.c',
+        'mqnic_regs.c',
 	'mqnic_ethdev.c',
 	'mqnic_rxtx.c'
 )
