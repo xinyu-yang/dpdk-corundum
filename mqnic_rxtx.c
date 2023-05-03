@@ -95,19 +95,19 @@ mqnic_rx_write_head_ptr(struct mqnic_rx_queue *rxq)
 static inline void
 mqnic_check_tx_cpl(struct mqnic_tx_queue *txq)
 {
-	struct mqnic_priv *priv = txq->priv;
+	struct mqnic_adapter *adapter = txq->adapter;
 	struct mqnic_cq_ring *cq_ring;
 
 	PMD_TX_LOG(DEBUG, "mqnic_check_tx_cpl start");
 
-	cq_ring = priv->tx_cpl_ring[txq->queue_id];   //assume queue_id of txq == queue_id of tx_cpl_queue
+	cq_ring = adapter->tx_cpl_ring[txq->queue_id];   //assume queue_id of txq == queue_id of tx_cpl_queue
 	mqnic_cq_read_head_ptr(cq_ring);
 
 	cq_ring->tail_ptr = cq_ring->head_ptr;
-    mqnic_tx_cq_write_tail_ptr(cq_ring);
+	mqnic_tx_cq_write_tail_ptr(cq_ring);
 
-    // process ring
-    mqnic_tx_read_tail_ptr(txq);
+	// process ring
+	mqnic_tx_read_tail_ptr(txq);
 	txq->clean_tail_ptr = txq->tail_ptr;
 
 	mqnic_arm_cq(cq_ring);
@@ -133,10 +133,10 @@ eth_mqnic_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 	uint16_t nb_tx;
 	uint32_t i;
 	uint32_t sub_desc_index;
-	struct mqnic_priv *priv;
+	struct mqnic_adapter *adapter;
 
 	txq = tx_queue;
-	priv= txq->priv;
+	adapter = txq->adapter;
 	sw_ring = txq->sw_ring;
 	txr     = txq->tx_ring;
 	tx_id   = txq->tx_tail;
@@ -221,7 +221,7 @@ eth_mqnic_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 				rte_cpu_to_le_32(slen);
 			
 			m_seg = m_seg->next;
-			priv->obytes+=slen;
+			adapter->obytes+=slen;
 			sub_desc_index++;
 			if(sub_desc_index >= txq->desc_block_size)
 				break;
@@ -236,7 +236,7 @@ eth_mqnic_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 		tx_id = txe->next_id;
 		txe = txn;
 		txq->head_ptr++;
-		priv->opackets++;
+		adapter->opackets++;
 	}
  end_of_tx:
 	rte_wmb();
@@ -277,18 +277,18 @@ eth_mqnic_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 	uint32_t ring_clean_tail_ptr;
 	volatile struct mqnic_cpl *cpl;
 	struct mqnic_cq_ring *cq_ring;
-	struct mqnic_priv *priv;
+	struct mqnic_adapter *adapter;
 	int done = 0;
-    int budget;
+	int budget;
 
 	rxq = rx_queue;
 	budget = rxq->full_size;
-	priv = rxq->priv;
-	cq_ring = priv->rx_cpl_ring[rxq->queue_id];
+	adapter = rxq->adapter;
+	cq_ring = adapter->rx_cpl_ring[rxq->queue_id];
 	mqnic_cq_read_head_ptr(cq_ring);
 
-    cq_tail_ptr = cq_ring->tail_ptr;
-    cq_index = cq_tail_ptr & cq_ring->size_mask;
+	cq_tail_ptr = cq_ring->tail_ptr;
+	cq_index = cq_tail_ptr & cq_ring->size_mask;
 
 	nb_rx = 0;
 	nb_hold = 0;
@@ -296,8 +296,8 @@ eth_mqnic_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 	rx_ring = rxq->rx_ring;
 	sw_ring = rxq->sw_ring;
 
-	if(cq_ring->ring_index != rxq->queue_id)
-		PMD_RX_LOG(ERR, "wrong cq_ring->ring_index, %d != %d", cq_ring->ring_index, rxq->queue_id);
+	if(cq_ring->index != rxq->queue_id)
+		PMD_RX_LOG(ERR, "wrong cq_ring->ring_index, %d != %d", cq_ring->index, rxq->queue_id);
 
 	while ((nb_rx < nb_pkts) && (cq_ring->head_ptr != cq_tail_ptr) && (done < budget)) {
 		cpl = (volatile struct mqnic_cpl *)(cq_ring->buf + cq_index*cq_ring->stride);
@@ -389,29 +389,29 @@ eth_mqnic_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 		cq_tail_ptr++;
         cq_index = cq_tail_ptr & cq_ring->size_mask;
 
-		priv->ipackets++;
-		priv->ibytes+=pkt_len;
+		adapter->ipackets++;
+		adapter->ibytes+=pkt_len;
 	}
 	rxq->rx_tail = rx_id;
 
 	// update CQ tail
-    cq_ring->tail_ptr = cq_tail_ptr;
-    mqnic_rx_cq_write_tail_ptr(cq_ring);
+	cq_ring->tail_ptr = cq_tail_ptr;
+	mqnic_rx_cq_write_tail_ptr(cq_ring);
 
 	mqnic_rx_read_tail_ptr(rxq);
 
-    ring_clean_tail_ptr = rxq->clean_tail_ptr;
+	ring_clean_tail_ptr = rxq->clean_tail_ptr;
 
-    while (ring_clean_tail_ptr != rxq->tail_ptr)
-    {
-        ring_clean_tail_ptr++;
-    }
+	while (ring_clean_tail_ptr != rxq->tail_ptr)
+	{
+		ring_clean_tail_ptr++;
+	}
 
-    // update ring tail
-    rxq->clean_tail_ptr = ring_clean_tail_ptr;
+	// update ring tail
+	rxq->clean_tail_ptr = ring_clean_tail_ptr;
 
 	mqnic_rx_write_head_ptr(rxq);
-	MQNIC_WRITE_FLUSH(priv);
+	MQNIC_WRITE_FLUSH(rxq);
 	mqnic_arm_cq(cq_ring);
 
 	return nb_rx;
@@ -610,8 +610,8 @@ mqnic_reset_tx_queue_stat(struct mqnic_tx_queue *txq)
 	txq->tx_tail = 0;
 	txq->ctx_curr = 0;
 	txq->head_ptr = 0;
-    txq->tail_ptr = 0;
-    txq->clean_tail_ptr = 0;
+	txq->tail_ptr = 0;
+	txq->clean_tail_ptr = 0;
 }
 
 static void
@@ -994,9 +994,6 @@ void
 mqnic_dev_deactive_queues(struct rte_eth_dev *dev)
 {
 	uint16_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
-
 	for (i = 0; i < dev->data->nb_rx_queues; i++) {
 		mqnic_deactivate_rx_queue(dev->data->rx_queues[i]);
 	}
@@ -1004,7 +1001,6 @@ mqnic_dev_deactive_queues(struct rte_eth_dev *dev)
 	for (i = 0; i < dev->data->nb_tx_queues; i++) {
 		mqnic_deactivate_tx_queue(dev->data->tx_queues[i]);
 	}
-	MQNIC_WRITE_FLUSH(priv);
 }
 
 /*********************************************************************

@@ -9,7 +9,7 @@
 
 #include "mqnic_osdep.h"
 #include "mqnic_regs.h"
-#include "rte_ethdev_core.h"
+//#include "rte_ethdev_core.h"
 
 #include <stdio.h>
 #include <errno.h>
@@ -828,13 +828,17 @@ struct mqnic_tx_queue {
 
 
 /*
- * Create interface
+ * Device initiate
+ */
+int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev);
+
+/*
+ * interface operations
  */
 int mqnic_create_if(struct rte_eth_dev *dev, int idx);
 
-
 /*
- * Create interface
+ * netdev operations
  */
 void mqnic_netdev_destroy(struct rte_eth_dev *dev);
 
