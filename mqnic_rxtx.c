@@ -679,8 +679,9 @@ eth_mqnic_tx_queue_setup(struct rte_eth_dev *dev,
 	const struct rte_memzone *tz;
 	struct mqnic_tx_queue *txq;
 	uint64_t offloads;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
+	struct mqnic_if *interface = adapter->interface;
+	int desc_block_size = interface->max_desc_block_size < 4 ? interface->max_desc_block_size : 4;
 
 	offloads = tx_conf->offloads | dev->data->dev_conf.txmode.offloads;
 
@@ -710,15 +711,15 @@ eth_mqnic_tx_queue_setup(struct rte_eth_dev *dev,
 		return -ENOMEM;
 
 	txq->size = roundup_pow_of_two(nb_desc);
-    txq->full_size = txq->size >> 1;
-    txq->size_mask = txq->size-1;
-    txq->stride = roundup_pow_of_two(MQNIC_DESC_SIZE*priv->desc_block_size);
+	txq->full_size = txq->size >> 1;
+	txq->size_mask = txq->size-1;
+	txq->stride = roundup_pow_of_two(MQNIC_DESC_SIZE * desc_block_size);
 
-    txq->desc_block_size = txq->stride/MQNIC_DESC_SIZE;
-    txq->log_desc_block_size = txq->desc_block_size < 2 ? 0 : ilog2(txq->desc_block_size-1)+1;
-    txq->desc_block_size = 1 << txq->log_desc_block_size;
+	txq->desc_block_size = txq->stride / MQNIC_DESC_SIZE;
+	txq->log_desc_block_size = txq->desc_block_size < 2 ? 0 : ilog2(txq->desc_block_size-1)+1;
+	txq->desc_block_size = 1 << txq->log_desc_block_size;
 
-	txq->buf_size = txq->size*txq->stride;
+	txq->buf_size = txq->size * txq->stride;
 
 	/*
 	 * Allocate TX ring hardware descriptors. A memzone large enough to
@@ -750,13 +751,13 @@ eth_mqnic_tx_queue_setup(struct rte_eth_dev *dev,
 	PMD_INIT_LOG(DEBUG, "tx sw_ring=%p hw_ring=%p dma_addr=0x%"PRIx64,
 		     txq->sw_ring, txq->tx_ring, txq->tx_ring_phys_addr);
 
-	txq->hw_addr = priv->hw_addr+priv->tx_queue_offset+queue_idx*MQNIC_QUEUE_STRIDE;
-    txq->hw_ptr_mask = 0xffff;
-    txq->hw_head_ptr = txq->hw_addr+MQNIC_QUEUE_HEAD_PTR_REG;
-    txq->hw_tail_ptr = txq->hw_addr+MQNIC_QUEUE_TAIL_PTR_REG;
+	txq->hw_addr = interface->hw_addr + interface->tx_queue_offset + queue_idx * interface->tx_queue_stride;
+	txq->hw_ptr_mask = 0xffff;
+	txq->hw_head_ptr = txq->hw_addr + MQNIC_QUEUE_HEAD_PTR_REG;
+	txq->hw_tail_ptr = txq->hw_addr + MQNIC_QUEUE_TAIL_PTR_REG;
 	txq->head_ptr = 0;
-    txq->tail_ptr = 0;
-    txq->clean_tail_ptr = 0;
+	txq->tail_ptr = 0;
+	txq->clean_tail_ptr = 0;
 
 	mqnic_reset_tx_queue(txq, dev);
 
@@ -814,8 +815,8 @@ mqnic_reset_rx_queue(struct mqnic_rx_queue *rxq)
 	rxq->pkt_last_seg = NULL;
 
 	rxq->head_ptr = 0;
-    rxq->tail_ptr = 0;
-    rxq->clean_tail_ptr = 0;
+	rxq->tail_ptr = 0;
+	rxq->clean_tail_ptr = 0;
 }
 
 uint64_t
@@ -848,8 +849,8 @@ eth_mqnic_rx_queue_setup(struct rte_eth_dev *dev,
 	const struct rte_memzone *rz;
 	struct mqnic_rx_queue *rxq;
 	uint64_t offloads;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
+	struct mqnic_if *interface = adapter->interface;
 
 	offloads = rx_conf->offloads | dev->data->dev_conf.rxmode.offloads;
 
@@ -880,14 +881,14 @@ eth_mqnic_rx_queue_setup(struct rte_eth_dev *dev,
 
 	rxq->size = roundup_pow_of_two(nb_desc);
 	rxq->full_size = rxq->size >> 1;
-    rxq->size_mask = rxq->size-1;
-    rxq->stride = roundup_pow_of_two(MQNIC_DESC_SIZE);
+	rxq->size_mask = rxq->size-1;
+	rxq->stride = roundup_pow_of_two(MQNIC_DESC_SIZE);
 
-    rxq->desc_block_size = rxq->stride/MQNIC_DESC_SIZE;
-    rxq->log_desc_block_size = rxq->desc_block_size < 2 ? 0 : ilog2(rxq->desc_block_size-1)+1;
-    rxq->desc_block_size = 1 << rxq->log_desc_block_size;
+	rxq->desc_block_size = rxq->stride / MQNIC_DESC_SIZE;
+	rxq->log_desc_block_size = rxq->desc_block_size < 2 ? 0 : ilog2(rxq->desc_block_size-1)+1;
+	rxq->desc_block_size = 1 << rxq->log_desc_block_size;
 
-	rxq->buf_size = rxq->size*rxq->stride;
+	rxq->buf_size = rxq->size * rxq->stride;
 
 	rxq->offloads = offloads;
 	rxq->mb_pool = mp;
@@ -915,14 +916,14 @@ eth_mqnic_rx_queue_setup(struct rte_eth_dev *dev,
 		return -ENOMEM;
 	}
 
-	rxq->hw_addr = priv->hw_addr+priv->rx_queue_offset+queue_idx*MQNIC_QUEUE_STRIDE;
-    rxq->hw_ptr_mask = 0xffff;
-    rxq->hw_head_ptr = rxq->hw_addr+MQNIC_QUEUE_HEAD_PTR_REG;
-    rxq->hw_tail_ptr = rxq->hw_addr+MQNIC_QUEUE_TAIL_PTR_REG;
+	rxq->hw_addr = interface->hw_addr + interface->rx_queue_offset + queue_idx * interface->rx_queue_stride;
+	rxq->hw_ptr_mask = 0xffff;
+	rxq->hw_head_ptr = rxq->hw_addr + MQNIC_QUEUE_HEAD_PTR_REG;
+	rxq->hw_tail_ptr = rxq->hw_addr + MQNIC_QUEUE_TAIL_PTR_REG;
 
-    rxq->head_ptr = 0;
-    rxq->tail_ptr = 0;
-    rxq->clean_tail_ptr = 0;
+	rxq->head_ptr = 0;
+	rxq->tail_ptr = 0;
+	rxq->clean_tail_ptr = 0;
 
 	rxq->rx_ring_phys_addr = rz->iova;
 	rxq->rx_ring = (struct mqnic_desc *) rz->addr;
@@ -1058,7 +1059,6 @@ eth_mqnic_rx_init(struct rte_eth_dev *dev)
 
 	/* Configure and enable each RX queue. */
 	for (i = 0; i < dev->data->nb_rx_queues; i++) {
-
 		rxq = dev->data->rx_queues[i];
 		if (rxq == NULL) {
 			PMD_INIT_LOG(ERR, "invalid rx queue buffer, i = %d.", i);
@@ -1092,13 +1092,11 @@ eth_mqnic_rx_init(struct rte_eth_dev *dev)
  *  Enable transmit unit.
  *
  **********************************************************************/
-void
-eth_mqnic_tx_init(struct rte_eth_dev *dev)
+int eth_mqnic_tx_init(struct rte_eth_dev *dev)
 {
 	struct mqnic_tx_queue *txq;
 	uint16_t i;
-	struct mqnic_priv *priv =
-		MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);
+	struct mqnic_hw *hw = MQNIC_DEV_PRIVATE_TO_HW(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "eth_mqnic_tx_init");
 
@@ -1107,22 +1105,22 @@ eth_mqnic_tx_init(struct rte_eth_dev *dev)
 		txq = dev->data->tx_queues[i];
 		if (txq == NULL) {
 			PMD_INIT_LOG(ERR, "invalid tx queue buffer, i = %d.", i);
-			return;
+			return -1;
 		}
 		txq->cpl_index = i;
-		txq->priv = priv;
+		txq->hw = hw;
 
 		// deactivate queue
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
-    	// set base address
+		// set base address
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_BASE_ADDR_REG+0, txq->tx_ring_phys_addr);
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_BASE_ADDR_REG+4, txq->tx_ring_phys_addr >> 32);
-    	// set completion queue index
+		// set completion queue index
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_CPL_QUEUE_INDEX_REG, txq->cpl_index);
-    	// set pointers
+		// set pointers
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_HEAD_PTR_REG, txq->head_ptr & txq->hw_ptr_mask);
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_TAIL_PTR_REG, txq->tail_ptr & txq->hw_ptr_mask);
-    	// set size and activate queue
+		// set size and activate queue
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(txq->size) | (txq->log_desc_block_size << 8) | MQNIC_QUEUE_ACTIVE_MASK);
 	}
 }

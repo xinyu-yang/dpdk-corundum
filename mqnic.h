@@ -730,7 +730,7 @@ struct mqnic_rx_queue {
 	u8 *hw_head_ptr;
 	u8 *hw_tail_ptr;
 
-	struct mqnic_priv *priv;
+	struct mqnic_adapter *adapter;
 	struct mqnic_hw *hw;
 };
 
@@ -799,7 +799,8 @@ struct mqnic_tx_queue {
 	uint8_t *hw_head_ptr;
 	uint8_t *hw_tail_ptr;
 
-	struct mqnic_priv *priv;
+	struct mqnic_adapter *adapter;
+	struct mqnic_hw *hw;
 };
 
 #if 1
@@ -898,7 +899,7 @@ int eth_mqnic_tx_queue_setup(struct rte_eth_dev *dev, uint16_t tx_queue_id,
 int eth_mqnic_tx_done_cleanup(void *txq, uint32_t free_cnt);
 
 int eth_mqnic_rx_init(struct rte_eth_dev *dev);
-void eth_mqnic_tx_init(struct rte_eth_dev *dev);
+int eth_mqnic_tx_init(struct rte_eth_dev *dev);
 
 uint16_t eth_mqnic_xmit_pkts(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts);
 //uint16_t eth_mqnic_prep_pkts(void *txq, struct rte_mbuf **tx_pkts,
