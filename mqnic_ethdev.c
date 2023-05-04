@@ -200,22 +200,22 @@ mqnic_all_event_queue_create(struct mqnic_if *interface)
 }
 
 static int
-mqnic_all_event_queue_alloc(struct mqnic_if *interface, int socket_id)
+mqnic_all_event_queue_alloc(struct rte_eth_dev *dev, int socket_id)
 {
 	const struct rte_memzone *tz;
 	struct mqnic_eq_ring *ring;
 	uint32_t i;
-	struct rte_eth_dev *dev = interface->hw->dev;
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
 	
-	PMD_INIT_LOG(DEBUG, "mqnic_all_event_queue_create");
+	PMD_INIT_LOG(DEBUG, "mqnic_all_event_queue_alloc");
 
-	for (i = 0; i < interface->event_queue_count; i++){
+	for (i = 0; i < adapter->event_queue_count; i++){
 		/* Free memory prior to re-allocation if needed */
-		if (interface->event_ring[i]->buf != NULL) {
+		if (adapter->event_ring[i]->buf != NULL) {
 			return -EINVAL;
 		}
 
-		ring = interface->event_ring[i];
+		ring = adapter->event_ring[i];
 
 		// Allocate event queue
 		ring->size = roundup_pow_of_two(event_queue_size);
@@ -233,8 +233,6 @@ mqnic_all_event_queue_alloc(struct mqnic_if *interface, int socket_id)
 		ring->buf = (u8*)tz->addr;
 		ring->buf_dma_addr = tz->iova;
 	}
-
-	MQNIC_WRITE_FLUSH(interface);
 
 	return 0;
 }
@@ -332,10 +330,10 @@ mqnic_all_event_queue_active(struct rte_eth_dev *dev)
 		// set size and active mask
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(ring->size) | MQNIC_EVENT_QUEUE_ACTIVE_MASK);
 
+		MQNIC_WRITE_FLUSH(ring);
 
 		mqnic_arm_eq(ring);
 	}
-	MQNIC_WRITE_FLUSH(ring);
 
 	return 0;
 }
@@ -480,7 +478,6 @@ mqnic_tx_cpl_queue_create(struct mqnic_if *interface)
 {
 	struct mqnic_cq_ring *ring;
 	uint32_t i;
-	struct mqnic_hw *hw = interface->hw;
 	
 	PMD_INIT_LOG(DEBUG, "mqnic_tx_cpl_queue_create");
 
@@ -863,7 +860,11 @@ int mqnic_all_ports_create(struct mqnic_if *interface)
 	PMD_INIT_LOG(DEBUG, "eth_mqnic_all_ports_create");
 
 	for (i = 0; i < interface->port_count; i++){
-		mqnic_single_port_create(interface, i);
+		ret = mqnic_single_port_create(interface, i);
+		if (ret) {
+			PMD_INIT_LOG(ERR, "Error when creating port %d", i);
+			goto fail;
+		}
 	}
 	MQNIC_WRITE_FLUSH(interface);
 
@@ -874,7 +875,6 @@ fail:
 
 void mqnic_all_ports_destroy(struct mqnic_if *interface)
 {
-	struct mqnic_port *port;
 	uint32_t i;
 
 	PMD_INIT_LOG(DEBUG, "mqnic_all_ports_destroy");
@@ -916,7 +916,7 @@ mqnic_all_port_deactivate(struct rte_eth_dev *dev)
 
 int mqnic_sched_block_create(struct mqnic_if *interface) {
 	int ret = 0;
-	int i;
+	u32 i;
 	u32 offset;
 	struct mqnic_reg_block *sched_block_rb;
 	struct mqnic_sched_block *block;
@@ -979,7 +979,7 @@ fail:
 
 void mqnic_destroy_sched_block(struct mqnic_sched_block **block_p)
 {
-	int i;
+	u32 i;
 	struct mqnic_sched_block *block = *block_p;
 
 	mqnic_deactivate_sched_block(block);
@@ -997,7 +997,7 @@ void mqnic_destroy_sched_block(struct mqnic_sched_block **block_p)
 
 void mqnic_deactivate_sched_block(struct mqnic_sched_block *block)
 {
-	int i;
+	u32 i;
 
 	// disable schedulers
 	for (i = 0; i < block->sched_count; i++)
@@ -1033,6 +1033,8 @@ int mqnic_scheduler_create(struct mqnic_sched_block *block, struct mqnic_sched *
 	mqnic_scheduler_disable(sched);
 
 	*sched_p = sched;
+
+	return 0;
 }
 
 void mqnic_destroy_scheduler(struct mqnic_sched **sched_ptr)
@@ -1081,6 +1083,9 @@ int mqnic_ethdev_create(struct mqnic_if *interface, int idx) {
 	// dpdk device->data has its own queue structure
 	// The rx/tx queue number is set by dpdk apps
 	/*dev->data->nb_rx_queues = interface->rx_queue_count;*/
+
+	// Alloc event queue
+	mqnic_all_event_queue_alloc(dev, 0);
 
 	// Alloc completion queue buffers
 	ret = mqnic_tx_cpl_queue_alloc(dev, 0);

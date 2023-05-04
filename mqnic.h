@@ -828,9 +828,12 @@ struct mqnic_tx_queue {
 
 
 /*
- * Device initiate
+ * Device operations
  */
 int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev);
+int eth_mqnic_dev_uninit(struct rte_eth_dev *eth_dev);
+int eth_mqnic_pci_probe(struct rte_pci_driver *pci_drv __rte_unused, struct rte_pci_device *pci_dev);
+int eth_mqnic_pci_remove(struct rte_pci_device *pci_dev);
 
 /*
  * interface operations
@@ -840,6 +843,7 @@ int mqnic_create_if(struct rte_eth_dev *dev, int idx);
 /*
  * netdev operations
  */
+int mqnic_ethdev_create(struct mqnic_if *interface, int idx);
 void mqnic_netdev_destroy(struct rte_eth_dev *dev);
 
 /*
@@ -852,6 +856,7 @@ void mqnic_free_reg_block_list(struct mqnic_reg_block *list);
 /*
  * Port manipulations
  */
+int mqnic_all_ports_create(struct mqnic_if *interface);
 void mqnic_all_ports_destroy(struct mqnic_if *interface);
 void mqnic_single_port_destroy(struct mqnic_port *port);
 
@@ -869,9 +874,11 @@ void mqnic_destroy_sched_block(struct mqnic_sched_block **block_p);
 void mqnic_deactivate_sched_block(struct mqnic_sched_block *block);
 void mqnic_destroy_scheduler(struct mqnic_sched **sched_ptr);
 void mqnic_scheduler_disable(struct mqnic_sched *sched);
+int mqnic_scheduler_create(struct mqnic_sched_block *block, struct mqnic_sched **sched_p, int idx, struct mqnic_reg_block *rb);
+int mqnic_sched_block_create(struct mqnic_if *interface);
 
 /*
- * RX/TX IGB function prototypes
+ * RX/TX function prototypes
  */
 void eth_mqnic_tx_queue_release(void *txq);
 void eth_mqnic_rx_queue_release(void *rxq);
@@ -932,45 +939,9 @@ void mqnic_rxq_info_get(struct rte_eth_dev *dev, uint16_t queue_id,
 void mqnic_txq_info_get(struct rte_eth_dev *dev, uint16_t queue_id,
 	struct rte_eth_txq_info *qinfo);
 
-uint32_t em_get_max_pktlen(struct rte_eth_dev *dev);
-
-/*
- * RX/TX EM function prototypes
- */
-void eth_em_tx_queue_release(void *txq);
-void eth_em_rx_queue_release(void *rxq);
-
-void em_dev_clear_queues(struct rte_eth_dev *dev);
-void em_dev_free_queues(struct rte_eth_dev *dev);
-
-uint64_t em_get_rx_port_offloads_capa(struct rte_eth_dev *dev);
-uint64_t em_get_rx_queue_offloads_capa(struct rte_eth_dev *dev);
-
-int eth_em_rx_queue_setup(struct rte_eth_dev *dev, uint16_t rx_queue_id,
-		uint16_t nb_rx_desc, unsigned int socket_id,
-		const struct rte_eth_rxconf *rx_conf,
-		struct rte_mempool *mb_pool);
-uint32_t eth_em_rx_queue_count(struct rte_eth_dev *dev, uint16_t rx_queue_id);
-
-int eth_em_rx_descriptor_done(void *rx_queue, uint16_t offset);
-int eth_em_rx_descriptor_status(void *rx_queue, uint16_t offset);
-int eth_em_tx_descriptor_status(void *tx_queue, uint16_t offset);
-
-uint64_t em_get_tx_port_offloads_capa(struct rte_eth_dev *dev);
-uint64_t em_get_tx_queue_offloads_capa(struct rte_eth_dev *dev);
-int eth_em_tx_queue_setup(struct rte_eth_dev *dev, uint16_t tx_queue_id,
-		uint16_t nb_tx_desc, unsigned int socket_id,
-		const struct rte_eth_txconf *tx_conf);
-
-int eth_em_rx_init(struct rte_eth_dev *dev);
-void eth_em_tx_init(struct rte_eth_dev *dev);
-uint16_t eth_em_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts, uint16_t nb_pkts);
-uint16_t eth_em_prep_pkts(void *txq, struct rte_mbuf **tx_pkts, uint16_t nb_pkts);
-uint16_t eth_em_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts, uint16_t nb_pkts);
-uint16_t eth_em_recv_scattered_pkts(void *rx_queue, struct rte_mbuf **rx_pkts, uint16_t nb_pkts);
-
-void em_rxq_info_get(struct rte_eth_dev *dev, uint16_t queue_id, struct rte_eth_rxq_info *qinfo);
-void em_txq_info_get(struct rte_eth_dev *dev, uint16_t queue_id, struct rte_eth_txq_info *qinfo);
+int32_t mqnic_get_basic_info_from_hw(struct mqnic_hw *hw);
+void mqnic_identify_hardware(struct rte_eth_dev *dev, struct rte_pci_device *pci_dev);
+s32 mqnic_read_mac_addr(struct mqnic_hw *hw);
 
 void mqnic_pf_host_uninit(struct rte_eth_dev *dev);
 void mqnic_filterlist_flush(struct rte_eth_dev *dev);
