@@ -6,6 +6,7 @@
 
 #include "mqnic.h"
 #include "mqnic_logs.h"
+#include "mqnic_osdep.h"
 #include "mqnic_regs.h"
 #include "rte_ethdev_core.h"
 
@@ -1374,6 +1375,16 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 	struct mqnic_hw *hw = MQNIC_DEV_PRIVATE_TO_HW(eth_dev->data->dev_private);
 	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(eth_dev->data->dev_private);
 
+	PMD_INIT_LOG(INFO, " mqnic PCI probe");
+	PMD_INIT_LOG(INFO, " Vendor: 0x%04x", pci_dev->id.vendor_id);
+	PMD_INIT_LOG(INFO, " Device: 0x%04x", pci_dev->id.device_id);
+	PMD_INIT_LOG(INFO, " Subsystem vendor: 0x%04x", pci_dev->id.subsystem_vendor_id);
+	PMD_INIT_LOG(INFO, " Subsystem device: 0x%04x", pci_dev->id.subsystem_device_id);
+	PMD_INIT_LOG(INFO, " Class: 0x%06x", pci_dev->id.class_id);
+	PMD_INIT_LOG(INFO, " PCI ID: %s", pci_dev->name);
+
+	mqnic_identify_hardware(eth_dev, pci_dev);
+
 	eth_dev->dev_ops = &eth_mqnic_ops;
 	eth_dev->rx_pkt_burst = &eth_mqnic_recv_pkts;
 	eth_dev->tx_pkt_burst = &eth_mqnic_xmit_pkts;
@@ -1391,7 +1402,15 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 	eth_dev->data->dev_flags |= RTE_ETH_DEV_AUTOFILL_QUEUE_XSTATS;
 
 	hw->hw_addr = (void *)pci_dev->mem_resource[0].addr;
+	hw->hw_regs_phys = pci_dev->mem_resource[0].phys_addr;
 	hw->hw_regs_size = pci_dev->mem_resource[0].len;
+
+	// Check if device needs to be reset
+	if (MQNIC_DIRECT_READ_REG(hw->hw_addr, 4) == 0xffffffff) {
+		error = -EIO;
+		PMD_INIT_LOG(ERR, "Device needs to be reset");
+		goto err_late;
+	}
 
 	// Enumerate registers
 	hw->rb_list = mqnic_enumerate_reg_block_list(hw->hw_addr, 0, hw->hw_regs_size);
@@ -1406,8 +1425,6 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 	    PMD_INIT_LOG(INFO, "\ttype 0x%08x (v %d.%d.%d.%d)", rb->type, rb->version >> 24,
 		    (rb->version >> 16) & 0xff, (rb->version >> 8) & 0xff, rb->version & 0xff);
 	}
-
-	mqnic_identify_hardware(eth_dev, pci_dev);
 
 	// Read ID registers
 	hw->fw_id_rb = mqnic_find_reg_block(hw->rb_list, MQNIC_RB_FW_ID_TYPE, MQNIC_RB_FW_ID_VER, 0);
@@ -1494,10 +1511,9 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 fail_create_if:
 fail_bar_size:
 fail_if_rb:
-fail_basic_info:
 fail_rb_init:
 	mqnic_free_reg_block_list(hw->rb_list);
-
+fail_basic_info:
 err_late:
 	return error;
 }
@@ -1849,6 +1865,6 @@ u32 mqnic_port_get_rx_status(struct mqnic_port *port)
 	return MQNIC_DIRECT_READ_REG(port->port_ctrl_rb->regs, MQNIC_RB_PORT_CTRL_REG_RX_STATUS);
 }
 
-RTE_PMD_REGISTER_PCI(net_mqnic_igb, rte_mqnic_pmd);
-RTE_PMD_REGISTER_PCI_TABLE(net_mqnic_igb, pci_id_mqnic_map);
-RTE_PMD_REGISTER_KMOD_DEP(net_mqnic_igb, "* uio_pci_generic | vfio");
+RTE_PMD_REGISTER_PCI(net_mqnic, rte_mqnic_pmd);
+RTE_PMD_REGISTER_PCI_TABLE(net_mqnic, pci_id_mqnic_map);
+RTE_PMD_REGISTER_KMOD_DEP(net_mqnic, "* uio_pci_generic | vfio");

@@ -6,6 +6,7 @@
  */
 
 #include "mqnic.h"
+#include "rte_malloc.h"
 
 struct mqnic_reg_block *mqnic_enumerate_reg_block_list(u8 *addr, size_t offset, size_t size)
 {
@@ -56,7 +57,7 @@ struct mqnic_reg_block *mqnic_enumerate_reg_block_list(u8 *addr, size_t offset, 
 		if (count >= max_count) {
 			struct mqnic_reg_block *tmp;
 			max_count += 4;
-			tmp = rte_malloc("mqnic register block", max_count * sizeof(struct mqnic_reg_block), 0);
+			tmp = rte_realloc(reg_block_list, max_count * sizeof(struct mqnic_reg_block), 0);
 			if (!tmp)
 				goto fail;
 			reg_block_list = tmp;

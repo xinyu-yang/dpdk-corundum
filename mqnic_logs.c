@@ -24,7 +24,7 @@ mqnic_mqnic_init_log(void)
 
 	mqnic_logtype_init = rte_log_register("pmd.net.mqnic.init");
 	if (mqnic_logtype_init >= 0)
-		rte_log_set_level(mqnic_logtype_init, RTE_LOG_NOTICE);
+		rte_log_set_level(mqnic_logtype_init, RTE_LOG_DEBUG);
 
 #ifdef RTE_LIBRTE_MQNIC_DEBUG_RX
 	mqnic_logtype_rx = rte_log_register("pmd.net.mqnic.rx");

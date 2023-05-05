@@ -1119,6 +1119,8 @@ int eth_mqnic_tx_init(struct rte_eth_dev *dev)
 		// set size and activate queue
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(txq->size) | (txq->log_desc_block_size << 8) | MQNIC_QUEUE_ACTIVE_MASK);
 	}
+
+	return 0;
 }
 
 void
