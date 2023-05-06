@@ -425,6 +425,8 @@ mqnic_tx_cpl_queue_active(struct rte_eth_dev *dev)
 		ring->eq_ring = adapter->event_ring[i % adapter->event_queue_count];
 		ring->eq_index = ring->eq_ring->index;
 
+		PMD_INIT_LOG(DEBUG, "completion queue %d with event queue %d", i, ring->eq_index);
+
 		mqnic_active_cpl_queue_registers(ring);
 		mqnic_arm_cq(ring);
 	}
@@ -451,6 +453,7 @@ mqnic_rx_cpl_queue_active(struct rte_eth_dev *dev)
 
 		ring->eq_ring = adapter->event_ring[i % adapter->event_queue_count];
 		ring->eq_index = ring->eq_ring->index;
+		PMD_INIT_LOG(DEBUG, "completion queue %d with event queue %d", i, ring->eq_index);
 
 		mqnic_active_cpl_queue_registers(ring);
 		mqnic_arm_cq(ring);
@@ -772,6 +775,7 @@ static void mqnic_deactivate_scheduler(struct mqnic_sched *sched)
 static void
 mqnic_set_interface_mtu(struct mqnic_if *interface, uint32_t mtu)
 {
+	PMD_INIT_LOG(DEBUG, "Set interface mtu=%d", mtu);
 	MQNIC_DIRECT_WRITE_REG(interface->if_ctrl_rb->regs, MQNIC_RB_IF_CTRL_REG_RX_MTU, mtu + ETH_HLEN);
 	MQNIC_DIRECT_WRITE_REG(interface->if_ctrl_rb->regs, MQNIC_RB_IF_CTRL_REG_TX_MTU, mtu + ETH_HLEN);
 }
@@ -1104,6 +1108,7 @@ int mqnic_ethdev_create(struct mqnic_if *interface, int idx) {
 	if (ret)
 		goto fail;
 
+	return 0;
 
 fail:
 	mqnic_netdev_destroy(dev);
@@ -1312,6 +1317,8 @@ int mqnic_create_if(struct rte_eth_dev *dev, int idx) {
 
 	hw->interface[idx] = interface;
 
+	return 0;
+
 fail:
 	mqnic_free_reg_block_list(interface->rb_list);
 	return ret;
@@ -1477,6 +1484,9 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 		goto fail_bar_size;
 	}
 
+	// Set interface count to 1
+	// TODO
+	hw->if_count = 1;
 	for (u32 i = 0; i < hw->if_count; i++) {
 		PMD_INIT_LOG(INFO, "Creating interface %d", i);
 		/*error = eth_mqnic_get_if_hw_info(eth_dev);*/
@@ -1616,7 +1626,11 @@ static int eth_mqnic_start(struct rte_eth_dev *dev)
 	/*mqnic_activate_first_port(dev);*/
 	/*interface->port_up = true;*/
 
-	eth_mqnic_link_update(dev, 0);
+	if (eth_mqnic_link_update(dev, 0) == 0) {
+		PMD_INIT_LOG(DEBUG, "Link status updated");
+	} else {
+		PMD_INIT_LOG(DEBUG, "Link status not updated");
+	}
 
 	PMD_INIT_LOG(DEBUG, "<<");
 

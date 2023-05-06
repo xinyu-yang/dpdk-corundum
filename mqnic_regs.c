@@ -90,5 +90,6 @@ struct mqnic_reg_block *mqnic_find_reg_block(struct mqnic_reg_block *list, u32 t
 
 void mqnic_free_reg_block_list(struct mqnic_reg_block *list)
 {
+	PMD_INIT_LOG(DEBUG, "Freeing register block list %p", list);
 	rte_free(list);
 }

@@ -3,6 +3,8 @@
  */
 
 #include "mqnic_logs.h"
+/*#define RTE_LIBRTE_MQNIC_DEBUG_RX*/
+/*#define RTE_LIBRTE_MQNIC_DEBUG_TX*/
 
 /* declared as extern in mqnic_logs.h */
 int mqnic_logtype_init;
@@ -29,13 +31,13 @@ mqnic_mqnic_init_log(void)
 #ifdef RTE_LIBRTE_MQNIC_DEBUG_RX
 	mqnic_logtype_rx = rte_log_register("pmd.net.mqnic.rx");
 	if (mqnic_logtype_rx >= 0)
-		rte_log_set_level(mqnic_logtype_rx, RTE_LOG_NOTICE);
+		rte_log_set_level(mqnic_logtype_rx, RTE_LOG_DEBUG);
 #endif
 
 #ifdef RTE_LIBRTE_MQNIC_DEBUG_TX
 	mqnic_logtype_tx = rte_log_register("pmd.net.mqnic.tx");
 	if (mqnic_logtype_tx >= 0)
-		rte_log_set_level(mqnic_logtype_tx, RTE_LOG_NOTICE);
+		rte_log_set_level(mqnic_logtype_tx, RTE_LOG_DEBUG);
 #endif
 
 	mqnic_log_initialized = 1;

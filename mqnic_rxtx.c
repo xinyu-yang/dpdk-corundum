@@ -30,6 +30,7 @@ mqnic_deactivate_rx_queue(struct mqnic_rx_queue *rxq)
 static int
 mqnic_activate_rxq(struct mqnic_rx_queue *rxq, int cpl_index)
 {
+	PMD_RX_LOG(DEBUG, "Activating rx queue with completion queue %d", cpl_index);
 	rxq->cpl_index = cpl_index;
 	// deactivate queue
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
@@ -43,7 +44,8 @@ mqnic_activate_rxq(struct mqnic_rx_queue *rxq, int cpl_index)
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_TAIL_PTR_REG, rxq->tail_ptr & rxq->hw_ptr_mask);
 	// set size and activate queue
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(rxq->size) | (rxq->log_desc_block_size << 8) | MQNIC_QUEUE_ACTIVE_MASK);
-    return 0;
+	MQNIC_WRITE_FLUSH(rxq);
+	return 0;
 }
 
 static bool 
@@ -710,6 +712,8 @@ eth_mqnic_tx_queue_setup(struct rte_eth_dev *dev,
 	if (txq == NULL)
 		return -ENOMEM;
 
+	txq->adapter = adapter;
+
 	txq->size = roundup_pow_of_two(nb_desc);
 	txq->full_size = txq->size >> 1;
 	txq->size_mask = txq->size-1;
@@ -748,8 +752,8 @@ eth_mqnic_tx_queue_setup(struct rte_eth_dev *dev,
 		mqnic_tx_queue_release(txq);
 		return -ENOMEM;
 	}
-	PMD_INIT_LOG(DEBUG, "tx sw_ring=%p hw_ring=%p dma_addr=0x%"PRIx64,
-		     txq->sw_ring, txq->tx_ring, txq->tx_ring_phys_addr);
+	PMD_INIT_LOG(DEBUG, "tx index=%d sw_ring=%p hw_ring=%p dma_addr=0x%"PRIx64,
+		     queue_idx, txq->sw_ring, txq->tx_ring, txq->tx_ring_phys_addr);
 
 	txq->hw_addr = interface->hw_addr + interface->tx_queue_offset + queue_idx * interface->tx_queue_stride;
 	txq->hw_ptr_mask = 0xffff;
@@ -879,6 +883,8 @@ eth_mqnic_rx_queue_setup(struct rte_eth_dev *dev,
 	if (rxq == NULL)
 		return -ENOMEM;
 
+	rxq->adapter = adapter;
+
 	rxq->size = roundup_pow_of_two(nb_desc);
 	rxq->full_size = rxq->size >> 1;
 	rxq->size_mask = rxq->size-1;
@@ -937,8 +943,8 @@ eth_mqnic_rx_queue_setup(struct rte_eth_dev *dev,
 		mqnic_rx_queue_release(rxq);
 		return -ENOMEM;
 	}
-	PMD_INIT_LOG(DEBUG, "rx sw_ring=%p hw_ring=%p dma_addr=0x%"PRIx64,
-		     rxq->sw_ring, rxq->rx_ring, rxq->rx_ring_phys_addr);
+	PMD_INIT_LOG(DEBUG, "rx index=%d sw_ring=%p hw_ring=%p dma_addr=0x%"PRIx64,
+		     queue_idx, rxq->sw_ring, rxq->rx_ring, rxq->rx_ring_phys_addr);
 
 	dev->data->rx_queues[queue_idx] = rxq;
 	mqnic_reset_rx_queue(rxq);
@@ -1070,7 +1076,6 @@ eth_mqnic_rx_init(struct rte_eth_dev *dev)
 			return ret;
 
 		mqnic_activate_rxq(rxq, i);
-		MQNIC_WRITE_FLUSH(hw);
 	}
 
 	if (dev->data->dev_conf.rxmode.offloads & DEV_RX_OFFLOAD_SCATTER) {
@@ -1106,6 +1111,8 @@ int eth_mqnic_tx_init(struct rte_eth_dev *dev)
 		txq->cpl_index = i;
 		txq->hw = hw;
 
+		PMD_TX_LOG(DEBUG, "Activating tx queue with completion queue %d", i);
+
 		// deactivate queue
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
 		// set base address
@@ -1118,6 +1125,8 @@ int eth_mqnic_tx_init(struct rte_eth_dev *dev)
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_TAIL_PTR_REG, txq->tail_ptr & txq->hw_ptr_mask);
 		// set size and activate queue
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(txq->size) | (txq->log_desc_block_size << 8) | MQNIC_QUEUE_ACTIVE_MASK);
+
+		MQNIC_WRITE_FLUSH(txq);
 	}
 
 	return 0;
