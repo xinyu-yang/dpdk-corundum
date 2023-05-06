@@ -19,6 +19,7 @@
 
 #define MQNIC_MAX_FRAGS 8
 
+// TODO: revise to default after debug
 #define MQNIC_MAX_EVENT_RINGS   2//256
 #define MQNIC_MAX_TX_RINGS      16//8192
 #define MQNIC_MAX_TX_CPL_RINGS  16//8192

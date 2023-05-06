@@ -190,39 +190,39 @@ static inline uint32_t roundup_pow_of_two(uint32_t x)
 
 
 /* Function pointers for the MAC. */
-struct mqnic_mac_operations {
-	s32  (*init_params)(struct mqnic_hw *);
-	s32  (*id_led_init)(struct mqnic_hw *);
-	s32  (*blink_led)(struct mqnic_hw *);
-	bool (*check_mng_mode)(struct mqnic_hw *);
-	s32  (*check_for_link)(struct mqnic_hw *);
-	s32  (*cleanup_led)(struct mqnic_hw *);
-	void (*clear_hw_cntrs)(struct mqnic_hw *);
-	void (*clear_vfta)(struct mqnic_hw *);
-	s32  (*get_bus_info)(struct mqnic_hw *);
-	void (*set_lan_id)(struct mqnic_hw *);
-	s32  (*get_link_up_info)(struct mqnic_hw *, u16 *, u16 *);
-	s32  (*led_on)(struct mqnic_hw *);
-	s32  (*led_off)(struct mqnic_hw *);
-	void (*update_mc_addr_list)(struct mqnic_hw *, u8 *, u32);
-	s32  (*reset_hw)(struct mqnic_hw *);
-	s32  (*init_hw)(struct mqnic_hw *);
-	void (*shutdown_serdes)(struct mqnic_hw *);
-	void (*power_up_serdes)(struct mqnic_hw *);
-	s32  (*setup_link)(struct mqnic_hw *);
-	s32  (*setup_physical_interface)(struct mqnic_hw *);
-	s32  (*setup_led)(struct mqnic_hw *);
-	void (*write_vfta)(struct mqnic_hw *, u32, u32);
-	void (*config_collision_dist)(struct mqnic_hw *);
-	int  (*rar_set)(struct mqnic_hw *, u8*, u32);
-	s32  (*read_mac_addr)(struct mqnic_hw *);
-	s32  (*validate_mdi_setting)(struct mqnic_hw *);
-	s32  (*acquire_swfw_sync)(struct mqnic_hw *, u16);
-	void (*release_swfw_sync)(struct mqnic_hw *, u16);
-};
+//struct mqnic_mac_operations {
+	//s32  (*init_params)(struct mqnic_hw *);
+	//s32  (*id_led_init)(struct mqnic_hw *);
+	//s32  (*blink_led)(struct mqnic_hw *);
+	//bool (*check_mng_mode)(struct mqnic_hw *);
+	//s32  (*check_for_link)(struct mqnic_hw *);
+	//s32  (*cleanup_led)(struct mqnic_hw *);
+	//void (*clear_hw_cntrs)(struct mqnic_hw *);
+	//void (*clear_vfta)(struct mqnic_hw *);
+	//s32  (*get_bus_info)(struct mqnic_hw *);
+	//void (*set_lan_id)(struct mqnic_hw *);
+	//s32  (*get_link_up_info)(struct mqnic_hw *, u16 *, u16 *);
+	//s32  (*led_on)(struct mqnic_hw *);
+	//s32  (*led_off)(struct mqnic_hw *);
+	//void (*update_mc_addr_list)(struct mqnic_hw *, u8 *, u32);
+	//s32  (*reset_hw)(struct mqnic_hw *);
+	//s32  (*init_hw)(struct mqnic_hw *);
+	//void (*shutdown_serdes)(struct mqnic_hw *);
+	//void (*power_up_serdes)(struct mqnic_hw *);
+	//s32  (*setup_link)(struct mqnic_hw *);
+	//s32  (*setup_physical_interface)(struct mqnic_hw *);
+	//s32  (*setup_led)(struct mqnic_hw *);
+	//void (*write_vfta)(struct mqnic_hw *, u32, u32);
+	//void (*config_collision_dist)(struct mqnic_hw *);
+	//int  (*rar_set)(struct mqnic_hw *, u8*, u32);
+	//s32  (*read_mac_addr)(struct mqnic_hw *);
+	//s32  (*validate_mdi_setting)(struct mqnic_hw *);
+	//s32  (*acquire_swfw_sync)(struct mqnic_hw *, u16);
+	//void (*release_swfw_sync)(struct mqnic_hw *, u16);
+//};
 
 struct mqnic_mac_info {
-	struct mqnic_mac_operations ops;
+	//struct mqnic_mac_operations ops;
 	u8 addr[ETH_ADDR_LEN];
 	u8 perm_addr[ETH_ADDR_LEN];
 

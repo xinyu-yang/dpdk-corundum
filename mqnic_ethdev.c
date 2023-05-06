@@ -186,8 +186,7 @@ mqnic_all_event_queue_create(struct mqnic_if *interface)
 		ring->head_ptr = 0;
 		ring->tail_ptr = 0;
 
-		PMD_INIT_LOG(DEBUG, "ring->buf=%p ring->hw_addr=%p ring->buf_dma_addr=0x%"PRIx64,
-		     ring->buf, ring->hw_addr, ring->buf_dma_addr);
+		PMD_INIT_LOG(DEBUG, "ring->hw_addr=%p", ring->hw_addr);
 
 		// Deactivate queue
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
@@ -233,6 +232,9 @@ mqnic_all_event_queue_alloc(struct rte_eth_dev *dev, int socket_id)
 		}
 		ring->buf = (u8*)tz->addr;
 		ring->buf_dma_addr = tz->iova;
+
+		PMD_INIT_LOG(DEBUG, "ring->buf=%p ring->hw_addr=%p ring->buf_dma_addr=0x%"PRIx64,
+		     ring->buf, ring->hw_addr, ring->buf_dma_addr);
 	}
 
 	return 0;
@@ -354,8 +356,7 @@ static void _create_cpl_queue(struct mqnic_cq_ring *ring, struct mqnic_if *inter
 	ring->head_ptr = 0;
 	ring->tail_ptr = 0;
 
-	PMD_INIT_LOG(DEBUG, "ring->buf=%p ring->hw_addr=%p ring->buf_dma_addr=0x%"PRIx64,
-	     ring->buf, ring->hw_addr, ring->buf_dma_addr);
+	PMD_INIT_LOG(DEBUG, "ring->hw_addr=%p", ring->hw_addr);
 }
 
 static int _alloc_cpl_queue(struct mqnic_cq_ring *ring, struct rte_eth_dev *dev, int i, int socket_id) {
@@ -375,6 +376,9 @@ static int _alloc_cpl_queue(struct mqnic_cq_ring *ring, struct rte_eth_dev *dev,
 
 	ring->buf = (u8*)tz->addr;
 	ring->buf_dma_addr = tz->iova;
+
+	PMD_INIT_LOG(DEBUG, "ring->buf=%p ring->hw_addr=%p ring->buf_dma_addr=0x%"PRIx64,
+	     ring->buf, ring->hw_addr, ring->buf_dma_addr);
 
 	return 0;
 }
@@ -867,7 +871,10 @@ int mqnic_all_ports_create(struct mqnic_if *interface)
 			goto fail;
 		}
 	}
+
 	MQNIC_WRITE_FLUSH(interface);
+
+	return 0;
 
 fail:
 	mqnic_all_ports_destroy(interface);
@@ -1314,30 +1321,30 @@ fail:
 int32_t mqnic_get_basic_info_from_hw(struct mqnic_hw *hw)
 {
     // Read ID registers
-    hw->fpga_id = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_FPGA_ID);
+    hw->fpga_id = MQNIC_DIRECT_READ_REG(hw->fw_id_rb->regs, MQNIC_RB_FW_ID_REG_FPGA_ID);
     PMD_INIT_LOG(DEBUG, "FPGA ID: 0x%08x", hw->fpga_id);
-    hw->fw_id = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_FW_ID);
+    hw->fw_id = MQNIC_DIRECT_READ_REG(hw->fw_id_rb->regs, MQNIC_RB_FW_ID_REG_FW_ID);
     PMD_INIT_LOG(DEBUG, "FW ID: 0x%08x", hw->fw_id);
 	if (hw->fw_id == 0xffffffff){
 		PMD_INIT_LOG(ERR, "Deivce needs to be reset");
 		return MQNIC_ERR_RESET;
 	}
 
-    hw->fw_ver = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_FW_VER);
+    hw->fw_ver = MQNIC_DIRECT_READ_REG(hw->fw_id_rb->regs, MQNIC_RB_FW_ID_REG_FW_VER);
     PMD_INIT_LOG(DEBUG, "FW version: %d.%d.%d.%d", hw->fw_ver >> 24, (hw->fw_ver >> 16) & 0xff,
 		(hw->fw_ver >> 8) & 0xff, hw->fw_ver & 0xff);
-    hw->board_id = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_BOARD_ID);
+    hw->board_id = MQNIC_DIRECT_READ_REG(hw->fw_id_rb->regs, MQNIC_RB_FW_ID_REG_BOARD_ID);
     PMD_INIT_LOG(DEBUG, "Board ID: 0x%08x", hw->board_id);
-    hw->board_ver = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_BOARD_VER);
+    hw->board_ver = MQNIC_DIRECT_READ_REG(hw->fw_id_rb->regs, MQNIC_RB_FW_ID_REG_BOARD_VER);
     PMD_INIT_LOG(DEBUG, "Board version: %d.%d.%d.%d", hw->board_ver >> 24,
 		(hw->board_ver >> 16) & 0xff,
 		(hw->board_ver >> 8) & 0xff,
 		hw->board_ver & 0xff);
-    hw->build_date = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_BUILD_DATE);
+    hw->build_date = MQNIC_DIRECT_READ_REG(hw->fw_id_rb->regs, MQNIC_RB_FW_ID_REG_BUILD_DATE);
     PMD_INIT_LOG(DEBUG, "Build date: %s (raw: %d)", asctime(localtime((time_t *)&(hw->build_date))), hw->build_date);
-    hw->git_hash = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_GIT_HASH);
+    hw->git_hash = MQNIC_DIRECT_READ_REG(hw->fw_id_rb->regs, MQNIC_RB_FW_ID_REG_GIT_HASH);
     PMD_INIT_LOG(DEBUG, "Git hash: %08x", hw->git_hash);
-    hw->rel_info = MQNIC_DIRECT_READ_REG(hw->fw_id_rb, MQNIC_RB_FW_ID_REG_REL_INFO);
+    hw->rel_info = MQNIC_DIRECT_READ_REG(hw->fw_id_rb->regs, MQNIC_RB_FW_ID_REG_REL_INFO);
     PMD_INIT_LOG(DEBUG, "Release info: %08x", hw->rel_info);
 
 	return MQNIC_SUCCESS;
@@ -1400,6 +1407,8 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 
 	rte_eth_copy_pci_info(eth_dev, pci_dev);
 	eth_dev->data->dev_flags |= RTE_ETH_DEV_AUTOFILL_QUEUE_XSTATS;
+
+	hw->dev = eth_dev;
 
 	hw->hw_addr = (void *)pci_dev->mem_resource[0].addr;
 	hw->hw_regs_phys = pci_dev->mem_resource[0].phys_addr;
@@ -1464,7 +1473,7 @@ int eth_mqnic_dev_init(struct rte_eth_dev *eth_dev)
 	if (hw->if_count * hw->if_stride > hw->hw_regs_size) {
 		error = -EIO;
 		PMD_INIT_LOG(ERR, "Invalid BAR configuration (%d IF * 0x%x > 0x%llx)",
-				hw->if_count, hw->if_stride, hw->hw_regs_size);
+				hw->if_count, hw->if_stride, (unsigned long long)hw->hw_regs_size);
 		goto fail_bar_size;
 	}
 
