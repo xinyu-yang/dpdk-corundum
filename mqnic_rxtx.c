@@ -20,6 +20,27 @@ mqnic_deactivate_tx_queue(struct mqnic_tx_queue *txq)
 	MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(txq->size) | (txq->log_desc_block_size << 8));
 }
 
+/*static int*/
+/*mqnic_activate_txq(struct mqnic_tx_queue *txq, int cpl_index)*/
+/*{*/
+	/*PMD_RX_LOG(DEBUG, "Activating tx queue with completion queue %d", cpl_index);*/
+	/*txq->cpl_index = cpl_index;*/
+	/*// deactivate queue*/
+	/*MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0);*/
+	/*// set base address*/
+	/*MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_BASE_ADDR_REG+0, txq->tx_ring_phys_addr);*/
+	/*MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_BASE_ADDR_REG+4, txq->tx_ring_phys_addr >> 32);*/
+	/*// set completion queue index*/
+	/*MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_CPL_QUEUE_INDEX_REG, txq->cpl_index);*/
+	/*// set pointers*/
+	/*MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_HEAD_PTR_REG, txq->head_ptr & txq->hw_ptr_mask);*/
+	/*MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_TAIL_PTR_REG, txq->tail_ptr & txq->hw_ptr_mask);*/
+	/*// set size and activate queue*/
+	/*MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, ilog2(txq->size) | (txq->log_desc_block_size << 8) | MQNIC_QUEUE_ACTIVE_MASK);*/
+	/*MQNIC_WRITE_FLUSH(txq);*/
+	/*return 0;*/
+/*}*/
+
 static void 
 mqnic_deactivate_rx_queue(struct mqnic_rx_queue *rxq)
 {
@@ -123,15 +144,16 @@ eth_mqnic_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 	struct mqnic_tx_queue *txq;
 	struct mqnic_tx_entry *sw_ring;
 	struct mqnic_tx_entry *txe, *txn;
-	volatile struct mqnic_desc *txr;
+	/*volatile struct mqnic_desc *txr;*/
 	volatile struct mqnic_desc *txd;
 	struct rte_mbuf     *tx_pkt;
 	struct rte_mbuf     *m_seg;
 	uint64_t buf_dma_addr;
 	uint16_t slen;
-	uint16_t tx_end;
-	uint16_t tx_id;
-	uint16_t tx_last;
+	/*uint16_t tx_end;*/
+	/*uint16_t tx_id;*/
+	u32 index;
+	/*uint16_t tx_last;*/
 	uint16_t nb_tx;
 	uint32_t i;
 	uint32_t sub_desc_index;
@@ -139,28 +161,33 @@ eth_mqnic_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 
 	txq = tx_queue;
 	adapter = txq->adapter;
-	sw_ring = txq->sw_ring;
-	txr     = txq->tx_ring;
-	tx_id   = txq->tx_tail;
-	txe = &sw_ring[tx_id];
+	sw_ring = txq->sw_ring; /* tx_info */
+	/*txr     = txq->tx_ring; [> buf <]*/
+	/*tx_id   = txq->tx_tail;*/
+
 
 	mqnic_check_tx_cpl(txq);
 
 	for (nb_tx = 0; nb_tx < nb_pkts; nb_tx++) {
+		index = txq->head_ptr & txq->size_mask;
+		if (index >= txq->nb_tx_desc)
+			index = (uint16_t) (index - txq->nb_tx_desc);
+
+		txe = &sw_ring[index]; /* tx_info */
+
 		sub_desc_index = 0;
+		txd = (struct mqnic_desc *)(txq->buf + index * txq->stride);
 		tx_pkt = *tx_pkts++;
 
 		RTE_MBUF_PREFETCH_TO_FREE(txe->mbuf[0]);
 
 		//tx_last = (uint16_t) (tx_id + tx_pkt->nb_segs - 1);
-		tx_last = (uint16_t) tx_id;
+		/*tx_last = (uint16_t) tx_id;*/
 
-		if (tx_last >= txq->nb_tx_desc)
-			tx_last = (uint16_t) (tx_last - txq->nb_tx_desc);
-
-		tx_end = sw_ring[tx_last].last_id;
-		tx_end = sw_ring[tx_end].next_id;
-		tx_end = sw_ring[tx_end].last_id;
+		// ???
+		/*tx_end = sw_ring[tx_last].last_id;*/
+		/*tx_end = sw_ring[tx_end].next_id;*/
+		/*tx_end = sw_ring[tx_end].last_id;*/
 
 		if(mqnic_is_tx_queue_full(txq)){
 			PMD_TX_LOG(DEBUG, "mqnic_is_tx_queue_full");
@@ -170,43 +197,12 @@ eth_mqnic_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 		}
 
 		m_seg = tx_pkt;
-#if 0
+		/*txn = &sw_ring[txe->next_id];*/
 		do {
-			txn = &sw_ring[txe->next_id];
-			txd = &txr[tx_id*4];
+			/*txd = &txr[index * txq->stride + sub_desc_index];*/
+			txd += sub_desc_index;
 
-			if (txe->mbuf != NULL)
-				rte_pktmbuf_free_seg(txe->mbuf);
-			txe->mbuf = m_seg;
-
-			/*
-			 * Set up transmit descriptor.
-			 */
-			slen = (uint16_t) m_seg->data_len;
-			buf_dma_addr = rte_mbuf_data_iova(m_seg);
-			txd->addr =
-				rte_cpu_to_le_64(buf_dma_addr);
-			txd->len =
-				rte_cpu_to_le_32(slen);
-
-    		for (i = 0; i < txq->desc_block_size-1; i++)
-    		{
-       			txd[i+1].len = 0;
-        		txd[i+1].addr = 0;
-    		}
-
-			txq->head_ptr++;
-			txe->last_id = tx_last;
-			tx_id = txe->next_id;
-			txe = txn;
-			m_seg = m_seg->next;
-			priv->opackets++;
-			priv->obytes+=slen;
-		} while (m_seg != NULL);
-#endif
-		txn = &sw_ring[txe->next_id];
-		do {
-			txd = &txr[tx_id*4+sub_desc_index];
+			/*txd->tx_csum_cmd = 0;*/
 
 			if (txe->mbuf[sub_desc_index] != NULL)
 				rte_pktmbuf_free_seg(txe->mbuf[sub_desc_index]);
@@ -217,26 +213,29 @@ eth_mqnic_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 			 */
 			slen = (uint16_t) m_seg->data_len;
 			buf_dma_addr = rte_mbuf_data_iova(m_seg);
-			txd->addr =
-				rte_cpu_to_le_64(buf_dma_addr);
-			txd->len =
-				rte_cpu_to_le_32(slen);
+			txd->addr = rte_cpu_to_le_64(buf_dma_addr);
+			txd->len = rte_cpu_to_le_32(slen);
+
+			PMD_TX_LOG(DEBUG, "desc_index=%u data_len=%u dma_addr=%u",
+				   (unsigned) index, (unsigned) txd->len, (unsigned) txd->addr);
 			
 			m_seg = m_seg->next;
+
 			adapter->obytes+=slen;
 			sub_desc_index++;
+
 			if(sub_desc_index >= txq->desc_block_size)
 				break;
 		} while (m_seg != NULL);
 
-		for (i = sub_desc_index; i < 4; i++)
-    	{
-       		txd[i].len = 0;
-        	txd[i].addr = 0;
-    	}
-		txe->last_id = tx_last;
-		tx_id = txe->next_id;
-		txe = txn;
+		for (i = sub_desc_index; i < txq->desc_block_size; i++)
+		{
+			txd[i].len = 0;
+			txd[i].addr = 0;
+		}
+		/*txe->last_id = tx_last;*/
+		/*tx_id = txe->next_id;*/
+		/*txe = txn;*/
 		txq->head_ptr++;
 		adapter->opackets++;
 	}
@@ -244,10 +243,10 @@ eth_mqnic_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 	rte_wmb();
 
 	MQNIC_DIRECT_WRITE_REG(txq->hw_head_ptr, 0, txq->head_ptr & txq->hw_ptr_mask);
-	PMD_TX_LOG(DEBUG, "port_id=%u queue_id=%u tx_tail=%u nb_tx=%u txq->head_ptr=%u",
+	PMD_TX_LOG(DEBUG, "port_id=%u queue_id=%u index=%u nb_tx=%u txq->head_ptr=%u",
 		   (unsigned) txq->port_id, (unsigned) txq->queue_id,
-		   (unsigned) tx_id, (unsigned) nb_tx, (unsigned) txq->head_ptr);
-	txq->tx_tail = tx_id;
+		   (unsigned) index, (unsigned) nb_tx, (unsigned) txq->head_ptr);
+	/*txq->tx_tail = tx_id;*/
 
 	return nb_tx;
 }
@@ -389,7 +388,7 @@ eth_mqnic_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 		rx_pkts[nb_rx++] = rxm;
 		done++;
 		cq_tail_ptr++;
-        cq_index = cq_tail_ptr & cq_ring->size_mask;
+		cq_index = cq_tail_ptr & cq_ring->size_mask;
 
 		adapter->ipackets++;
 		adapter->ibytes+=pkt_len;
@@ -743,6 +742,7 @@ eth_mqnic_tx_queue_setup(struct rte_eth_dev *dev,
 	txq->port_id = dev->data->port_id;
 	txq->tx_ring_phys_addr = tz->iova;
 	txq->tx_ring = (struct mqnic_desc *) tz->addr;
+	txq->buf = (uint8_t *)tz->addr; /* Used to replace tx_ring */
 
 	txq->sw_ring = rte_zmalloc("txq->sw_ring",
 				   sizeof(struct mqnic_tx_entry) * txq->nb_tx_desc,
@@ -1098,6 +1098,7 @@ int eth_mqnic_tx_init(struct rte_eth_dev *dev)
 	struct mqnic_tx_queue *txq;
 	uint16_t i;
 	struct mqnic_hw *hw = MQNIC_DEV_PRIVATE_TO_HW(dev->data->dev_private);
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
 	
 	PMD_INIT_LOG(DEBUG, "eth_mqnic_tx_init");
 
@@ -1110,6 +1111,7 @@ int eth_mqnic_tx_init(struct rte_eth_dev *dev)
 		}
 		txq->cpl_index = i;
 		txq->hw = hw;
+		txq->adapter = adapter;
 
 		PMD_TX_LOG(DEBUG, "Activating tx queue with completion queue %d", i);
 

@@ -752,25 +752,30 @@ static void mqnic_deactivate_scheduler(struct mqnic_sched *sched)
 	MQNIC_DIRECT_WRITE_REG(sched->rb->regs, MQNIC_RB_SCHED_RR_REG_CTRL, 0);
 }
 
-/*static int mqnic_activate_first_port(struct rte_eth_dev *dev)*/
-/*{*/
-	/*uint32_t k;*/
-	/*struct mqnic_priv *priv =*/
-		/*MQNIC_DEV_PRIVATE_TO_PRIV(dev->data->dev_private);*/
-	/*struct mqnic_port *port = priv->ports[0];*/
+static int mqnic_activate_first_sched_block(struct rte_eth_dev *dev)
+{
+	uint32_t k;
+	struct mqnic_adapter *adapter = MQNIC_DEV_PRIVATE(dev->data->dev_private);
+	struct mqnic_sched_block *block = adapter->sched_block[0];
+	struct mqnic_sched *sched;
 
-	/*// enable schedulers*/
-	/*MQNIC_DIRECT_WRITE_REG(port->hw_addr, MQNIC_PORT_REG, 0xffffffff);*/
+	for (k = 0; k < block->sched_count; k++) {
+		sched = block->sched[k];
+		if (sched) {
+			// enable schedulers
+			MQNIC_DIRECT_WRITE_REG(sched->rb->regs, MQNIC_RB_SCHED_RR_REG_CTRL, 1);
 
-	/*// enable queues*/
-	/*for (k = 0; k < port->tx_queue_count; k++)*/
-	/*{*/
-		/*MQNIC_DIRECT_WRITE_REG(port->hw_addr, port->sched_offset+k*4, 3);*/
-	/*}*/
-	/*MQNIC_WRITE_FLUSH(priv);*/
+			// enable queues
+			for (k = 0; k < sched->channel_count; k++)
+			{
+				MQNIC_DIRECT_WRITE_REG(sched->hw_addr, sched->channel_stride * k, 3);
+			}
+			MQNIC_WRITE_FLUSH(sched);
+		}
+	}
 
-	/*return 0;*/
-/*}*/
+	return 0;
+}
 
 static void
 mqnic_set_interface_mtu(struct mqnic_if *interface, uint32_t mtu)
@@ -836,17 +841,6 @@ static int mqnic_single_port_create(struct mqnic_if *interface, int i) {
 	PMD_INIT_LOG(INFO, "Port features: 0x%08x", port->port_features);
 	PMD_INIT_LOG(INFO, "Port TX status: 0x%08x", mqnic_port_get_tx_status(port));
 	PMD_INIT_LOG(INFO, "Port RX status: 0x%08x", mqnic_port_get_rx_status(port));
-
-	/*port->port_mtu = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_PORT_MTU);*/
-	/*PMD_INIT_LOG(INFO, "Port MTU: %d", port->port_mtu);*/
-	/*port->sched_count = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_COUNT);*/
-	/*PMD_INIT_LOG(INFO, "Scheduler count: %d", port->sched_count);*/
-	/*port->sched_offset = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_OFFSET);*/
-	/*PMD_INIT_LOG(INFO, "Scheduler offset: 0x%08x", port->sched_offset);*/
-	/*port->sched_stride = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_STRIDE);*/
-	/*PMD_INIT_LOG(INFO, "Scheduler stride: 0x%08x", port->sched_stride);*/
-	/*port->sched_type = MQNIC_DIRECT_READ_REG(port->hw_addr, MQNIC_PORT_REG_SCHED_TYPE);*/
-	/*PMD_INIT_LOG(INFO, "Scheduler type: 0x%08x", port->sched_type);*/
 
 	/*mqnic_deactivate_port(port);*/
 	/*mqnic_port_set_rss_mask(port, 0xffffffff);*/
@@ -977,6 +971,8 @@ int mqnic_sched_block_create(struct mqnic_if *interface) {
 				block->sched_count++;
 			}
 		}
+
+		interface->sched_block[i] = block;
 	}
 
 	PMD_INIT_LOG(INFO, "Scheduler count: %d", block->sched_count);
@@ -1091,6 +1087,10 @@ int mqnic_ethdev_create(struct mqnic_if *interface, int idx) {
 	adapter->rx_cpl_queue_count = interface->rx_cpl_queue_count;
 	for (i=0; i<adapter->rx_cpl_queue_count; i++)
 		adapter->rx_cpl_ring[i] = interface->rx_cpl_ring[i];
+
+	adapter->sched_block_count = interface->sched_block_count;
+	for (i=0; i<adapter->sched_block_count; i++)
+		adapter->sched_block[i] = interface->sched_block[i];
 
 	// dpdk device->data has its own queue structure
 	// The rx/tx queue number is set by dpdk apps
@@ -1623,8 +1623,8 @@ static int eth_mqnic_start(struct rte_eth_dev *dev)
 	}
 
 	mqnic_set_interface_mtu(interface, 1500);
-	/*mqnic_activate_first_port(dev);*/
-	/*interface->port_up = true;*/
+	mqnic_activate_first_sched_block(dev);
+	adapter->port_up = true;
 
 	if (eth_mqnic_link_update(dev, 0) == 0) {
 		PMD_INIT_LOG(DEBUG, "Link status updated");
