@@ -6,6 +6,8 @@
 /*#define RTE_LIBRTE_MQNIC_DEBUG_RX*/
 /*#define RTE_LIBRTE_MQNIC_DEBUG_TX*/
 
+#define OVERALL_LOG_LEVEL RTE_LOG_NOTICE
+
 /* declared as extern in mqnic_logs.h */
 int mqnic_logtype_init;
 
@@ -26,18 +28,18 @@ mqnic_mqnic_init_log(void)
 
 	mqnic_logtype_init = rte_log_register("pmd.net.mqnic.init");
 	if (mqnic_logtype_init >= 0)
-		rte_log_set_level(mqnic_logtype_init, RTE_LOG_DEBUG);
+		rte_log_set_level(mqnic_logtype_init, OVERALL_LOG_LEVEL);
 
 #ifdef RTE_LIBRTE_MQNIC_DEBUG_RX
 	mqnic_logtype_rx = rte_log_register("pmd.net.mqnic.rx");
 	if (mqnic_logtype_rx >= 0)
-		rte_log_set_level(mqnic_logtype_rx, RTE_LOG_DEBUG);
+		rte_log_set_level(mqnic_logtype_rx, OVERALL_LOG_LEVEL);
 #endif
 
 #ifdef RTE_LIBRTE_MQNIC_DEBUG_TX
 	mqnic_logtype_tx = rte_log_register("pmd.net.mqnic.tx");
 	if (mqnic_logtype_tx >= 0)
-		rte_log_set_level(mqnic_logtype_tx, RTE_LOG_DEBUG);
+		rte_log_set_level(mqnic_logtype_tx, OVERALL_LOG_LEVEL);
 #endif
 
 	mqnic_log_initialized = 1;

@@ -51,7 +51,7 @@ mqnic_deactivate_rx_queue(struct mqnic_rx_queue *rxq)
 static int
 mqnic_activate_rxq(struct mqnic_rx_queue *rxq, int cpl_index)
 {
-	PMD_RX_LOG(DEBUG, "Activating rx queue with completion queue %d", cpl_index);
+	PMD_RX_LOG(DEBUG, "Activating rx queue %d with completion queue %d", rxq->queue_id, cpl_index);
 	rxq->cpl_index = cpl_index;
 	// deactivate queue
 	MQNIC_DIRECT_WRITE_REG(rxq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
@@ -251,6 +251,49 @@ eth_mqnic_xmit_pkts(void *tx_queue, struct rte_mbuf **tx_pkts,
 	return nb_tx;
 }
 
+int eth_mqnic_prepare_rx_desc(struct mqnic_rx_queue *rxq, int index) {
+	struct mqnic_rx_entry *rxe = &rxq->sw_ring[index];
+	struct rte_mbuf *nmb;
+	uint64_t dma_addr;
+	volatile struct mqnic_desc *rxdp = (struct mqnic_desc *)(rxq->buf + index * rxq->stride);
+
+	nmb = rte_mbuf_raw_alloc(rxq->mb_pool);
+	if (nmb == NULL) {
+		PMD_RX_LOG(ERR, "RX mbuf alloc failed port_id=%u "
+			   "queue_id=%u", (unsigned) rxq->port_id,
+			   (unsigned) rxq->queue_id);
+		rte_eth_devices[rxq->port_id].data->rx_mbuf_alloc_failed++;
+		return -1;
+	}
+
+	rxe->mbuf = nmb;
+
+	PMD_RX_LOG(DEBUG, "nmb->buf_len=%u ", (unsigned) nmb->buf_len);
+	rxdp->len = nmb->buf_len;
+	dma_addr = rte_cpu_to_le_64(rte_mbuf_data_iova_default(nmb));
+	rxdp->addr = dma_addr;
+
+	return 0;
+}
+
+void eth_mqnic_refill_rx_buffers(struct mqnic_rx_queue *rxq) {
+	u32 missing = rxq->size - (rxq->head_ptr - rxq->clean_tail_ptr);
+
+	if (missing < 8)
+		return;
+
+	for (; missing-- > 0;) {
+		if (eth_mqnic_prepare_rx_desc(rxq, rxq->head_ptr & rxq->size_mask))
+			break;
+		rxq->head_ptr++;
+	}
+
+	// enqueue on NIC
+	mqnic_rx_write_head_ptr(rxq);
+	MQNIC_WRITE_FLUSH(rxq);
+	return;
+}
+
 /*********************************************************************
  *
  *  RX functions
@@ -262,16 +305,13 @@ eth_mqnic_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 {
 	struct mqnic_rx_queue *rxq;
 	volatile struct mqnic_desc *rx_ring;
-	volatile struct mqnic_desc *rxdp;
 	struct mqnic_rx_entry *sw_ring;
 	struct mqnic_rx_entry *rxe;
 	struct rte_mbuf *rxm;
-	struct rte_mbuf *nmb;
-	uint64_t dma_addr;
 	uint16_t pkt_len;
-	uint16_t rx_id;
+	/*uint16_t rx_id;*/
 	uint16_t nb_rx;
-	uint16_t nb_hold;
+	/*uint16_t nb_hold;*/
 	uint32_t cq_index;
 	uint32_t cq_tail_ptr;
 	uint32_t cq_desc_inline_index;
@@ -285,79 +325,60 @@ eth_mqnic_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 	rxq = rx_queue;
 	budget = rxq->full_size;
 	adapter = rxq->adapter;
-	cq_ring = adapter->rx_cpl_ring[rxq->queue_id];
+	cq_ring = adapter->rx_cpl_ring[rxq->cpl_index];
 	mqnic_cq_read_head_ptr(cq_ring);
 
 	cq_tail_ptr = cq_ring->tail_ptr;
 	cq_index = cq_tail_ptr & cq_ring->size_mask;
 
 	nb_rx = 0;
-	nb_hold = 0;
-	rx_id = rxq->rx_tail;
+	/*nb_hold = 0;*/
+	/*rx_id = rxq->rx_tail;*/
 	rx_ring = rxq->rx_ring;
 	sw_ring = rxq->sw_ring;
 
-	if(cq_ring->index != rxq->queue_id)
-		PMD_RX_LOG(ERR, "wrong cq_ring->ring_index, %d != %d", cq_ring->index, rxq->queue_id);
+	if(cq_ring->index != rxq->cpl_index)
+		PMD_RX_LOG(ERR, "wrong cq_ring->index, %d != %d", cq_ring->index, rxq->cpl_index);
 
 	while ((nb_rx < nb_pkts) && (cq_ring->head_ptr != cq_tail_ptr) && (done < budget)) {
-		cpl = (volatile struct mqnic_cpl *)(cq_ring->buf + cq_index*cq_ring->stride);
+		cpl = (volatile struct mqnic_cpl *)(cq_ring->buf + cq_index * cq_ring->stride);
 		cq_desc_inline_index = cpl->index & rxq->size_mask; //number of desc
 
 		PMD_RX_LOG(DEBUG, "eth_mqnic_recv_pkts, nb_pkts = %d, cq_ring->head_ptr = %d, cq_tail_ptr = %d, budget = %d, cpl->len = %d",
 			nb_pkts, cq_ring->head_ptr, cq_tail_ptr, budget, cpl->len);
-		if(cq_desc_inline_index != cq_index){
-			PMD_RX_LOG(ERR, "wrong cq desc index, %d != %d", cq_desc_inline_index, cq_index);
-			break;
-		}
+		/*if(cq_desc_inline_index != cq_index){*/
+			/*PMD_RX_LOG(ERR, "wrong cq desc index, %d != %d", cq_desc_inline_index, cq_index);*/
+			/*break;*/
+		/*}*/
 
-		if(rx_id != cq_index){
-			PMD_RX_LOG(ERR, "wrong rx_id, %d != %d", rx_id, cq_index);
-			break;
-		}
-		rxdp = &rx_ring[rx_id];
+		/*if(rx_id != cq_index){*/
+			/*PMD_RX_LOG(ERR, "wrong rx_id, %d != %d", rx_id, cq_index);*/
+			/*break;*/
+		/*}*/
+		/*rxdp = &rx_ring[rx_id];*/
 
-		PMD_RX_LOG(DEBUG, "port_id=%u queue_id=%u rx_id=%u ",
-			   (unsigned) rxq->port_id, (unsigned) rxq->queue_id,
-			   (unsigned) rx_id);
+		/*PMD_RX_LOG(DEBUG, "port_id=%u queue_id=%u rx_id=%u ",*/
+			   /*(unsigned) rxq->port_id, (unsigned) rxq->queue_id,*/
+			   /*(unsigned) rx_id);*/
 
-		nmb = rte_mbuf_raw_alloc(rxq->mb_pool);
-		if (nmb == NULL) {
-			PMD_RX_LOG(ERR, "RX mbuf alloc failed port_id=%u "
-				   "queue_id=%u", (unsigned) rxq->port_id,
-				   (unsigned) rxq->queue_id);
-			rte_eth_devices[rxq->port_id].data->rx_mbuf_alloc_failed++;
-			break;
-		}
 
-		nb_hold++;
-		rxe = &sw_ring[rx_id];
-		rx_id++;
-		if (rx_id == rxq->nb_rx_desc)
-			rx_id = 0;
+		/*nb_hold++;*/
+		rxe = &sw_ring[cq_desc_inline_index];
 
 		/* Prefetch next mbuf while processing current one. */
-		rte_mqnic_prefetch(sw_ring[rx_id].mbuf);
+		rte_mqnic_prefetch(sw_ring[cq_desc_inline_index].mbuf);
 
 		/*
 		 * When next RX descriptor is on a cache-line boundary,
 		 * prefetch the next 4 RX descriptors and the next 8 pointers
 		 * to mbufs.
 		 */
-		if ((rx_id & 0x3) == 0) {
-			rte_mqnic_prefetch(&rx_ring[rx_id]);
-			rte_mqnic_prefetch(&sw_ring[rx_id]);
-		}
+		/*if ((rx_id & 0x3) == 0) {*/
+			/*rte_mqnic_prefetch(&rx_ring[rx_id]);*/
+			/*rte_mqnic_prefetch(&sw_ring[cq_desc_inline_index]);*/
+		/*}*/
 
 		rxm = rxe->mbuf;
-		rxe->mbuf = nmb;
-		dma_addr =
-			rte_cpu_to_le_64(rte_mbuf_data_iova_default(nmb));
-		rxdp->len = nmb->buf_len;
-		PMD_RX_LOG(DEBUG, "nmb->buf_len=%u ", (unsigned) nmb->buf_len);
-		rxdp->addr = dma_addr;
-
-		rxq->head_ptr++;
 
 		/*
 		 * Initialize the returned mbuf.
@@ -381,38 +402,46 @@ eth_mqnic_recv_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 		rxm->data_len = pkt_len;
 		rxm->port = rxq->port_id;
 
+		rxe->mbuf = NULL;
 		/*
 		 * Store the mbuf address into the next entry of the array
 		 * of returned packets.
 		 */
 		rx_pkts[nb_rx++] = rxm;
 		done++;
+
 		cq_tail_ptr++;
 		cq_index = cq_tail_ptr & cq_ring->size_mask;
 
 		adapter->ipackets++;
 		adapter->ibytes+=pkt_len;
 	}
-	rxq->rx_tail = rx_id;
+	/*rxq->rx_tail = rx_id;*/
 
 	// update CQ tail
 	cq_ring->tail_ptr = cq_tail_ptr;
 	mqnic_rx_cq_write_tail_ptr(cq_ring);
 
+	u32 ring_index;
+	struct mqnic_rx_entry *rx_info;
 	mqnic_rx_read_tail_ptr(rxq);
-
 	ring_clean_tail_ptr = rxq->clean_tail_ptr;
 
 	while (ring_clean_tail_ptr != rxq->tail_ptr)
 	{
+		ring_index = ring_clean_tail_ptr & rxq->size_mask;
+		rx_info = &rxq->sw_ring[ring_index];
+		if (rx_info->mbuf)
+			break;
+
 		ring_clean_tail_ptr++;
 	}
 
 	// update ring tail
 	rxq->clean_tail_ptr = ring_clean_tail_ptr;
 
-	mqnic_rx_write_head_ptr(rxq);
-	MQNIC_WRITE_FLUSH(rxq);
+	eth_mqnic_refill_rx_buffers(rxq);
+
 	mqnic_arm_cq(cq_ring);
 
 	return nb_rx;
@@ -429,6 +458,8 @@ eth_mqnic_recv_scattered_pkts(void *rx_queue, struct rte_mbuf **rx_pkts,
 	return 0;
 
 }
+
+
 
 /*
  * Maximum number of Ring Descriptors.
@@ -931,8 +962,11 @@ eth_mqnic_rx_queue_setup(struct rte_eth_dev *dev,
 	rxq->tail_ptr = 0;
 	rxq->clean_tail_ptr = 0;
 
-	rxq->rx_ring_phys_addr = rz->iova;
-	rxq->rx_ring = (struct mqnic_desc *) rz->addr;
+	rxq->rx_ring_phys_addr = rz->iova; /* buf_dma_addr */
+	rxq->rx_ring = (struct mqnic_desc *) rz->addr; /* buf */
+
+	rxq->buf_dma_addr = rz->iova;
+	rxq->buf = (uint8_t *) rz->addr;
 
 	/* Allocate software ring. */
 	rxq->sw_ring = rte_zmalloc("rxq->sw_ring",
@@ -1113,7 +1147,7 @@ int eth_mqnic_tx_init(struct rte_eth_dev *dev)
 		txq->hw = hw;
 		txq->adapter = adapter;
 
-		PMD_TX_LOG(DEBUG, "Activating tx queue with completion queue %d", i);
+		PMD_TX_LOG(DEBUG, "Activating tx queue %d with completion queue %d", txq->queue_id, txq->cpl_index);
 
 		// deactivate queue
 		MQNIC_DIRECT_WRITE_REG(txq->hw_addr, MQNIC_QUEUE_ACTIVE_LOG_SIZE_REG, 0);

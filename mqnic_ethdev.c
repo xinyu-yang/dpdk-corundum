@@ -318,6 +318,7 @@ mqnic_all_event_queue_active(struct rte_eth_dev *dev)
 			return -1;
 		}
 		ring->irq = int_index;
+		ring->active = 1;
 
 		// deactivate queue
 		MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_EVENT_QUEUE_ACTIVE_LOG_SIZE_REG, 0);
@@ -342,13 +343,19 @@ mqnic_all_event_queue_active(struct rte_eth_dev *dev)
 }
 
 
-static void _create_cpl_queue(struct mqnic_cq_ring *ring, struct mqnic_if *interface, int i) {
+static void _create_cpl_queue(struct mqnic_cq_ring *ring, struct mqnic_if *interface, int i, bool is_tx) {
 	ring->interface = interface;
 	ring->index = i;
 	ring->active = 0;
 
-	ring->hw_addr = interface->hw_addr + interface->tx_cpl_queue_offset
-		+ i * interface->tx_cpl_queue_stride;
+	if (is_tx)
+		ring->hw_addr = interface->hw_addr
+			+ interface->tx_cpl_queue_offset
+			+ i * interface->tx_cpl_queue_stride;
+	else
+		ring->hw_addr = interface->hw_addr
+			+ interface->rx_cpl_queue_offset
+			+ i * interface->rx_cpl_queue_stride;
 	ring->hw_ptr_mask = 0xffff;
 	ring->hw_head_ptr = ring->hw_addr + MQNIC_CPL_QUEUE_HEAD_PTR_REG;
 	ring->hw_tail_ptr = ring->hw_addr + MQNIC_CPL_QUEUE_TAIL_PTR_REG;
@@ -506,7 +513,7 @@ mqnic_tx_cpl_queue_create(struct mqnic_if *interface)
 		}
 
 		// Create completion queue
-		_create_cpl_queue(ring, interface, i);
+		_create_cpl_queue(ring, interface, i, true);
 
 		interface->tx_cpl_ring[i] = ring;
 	}
@@ -626,7 +633,7 @@ mqnic_rx_cpl_queue_create(struct mqnic_if *interface)
 		}
 
 		// Create completion queue
-		_create_cpl_queue(ring, interface, i);
+		_create_cpl_queue(ring, interface, i, false);
 
 		interface->rx_cpl_ring[i] = ring;
 	}
@@ -1377,6 +1384,9 @@ s32 mqnic_read_mac_addr(struct mqnic_hw *hw)
 	hw->mac.addr[0] = 0x00;
 	hw->mac.addr[1] = 0xAA;
 	hw->mac.addr[2] = 0xBB;
+	hw->mac.addr[3] = 0xCC;
+	hw->mac.addr[4] = 0xDD;
+	hw->mac.addr[5] = 0xEE;
 
 	return MQNIC_SUCCESS;
 }
