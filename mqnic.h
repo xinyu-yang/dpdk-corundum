@@ -564,8 +564,8 @@ struct mqnic_cq_ring {
 
 	//struct net_device *ndev;
 	// struct napi_struct napi;
-	int index;
-	int eq_index;
+	u32 index;
+	u32 eq_index;
 	int active;
 	void (*handler) (struct mqnic_cq_ring *);
 
@@ -613,21 +613,6 @@ struct mqnic_eq_ring {
 
 #define MQNIC_DEV_PRIVATE_TO_PRIV(adapter) \
 	(&((struct mqnic_adapter *)adapter)->priv)
-
-#define MQNIC_DEV_PRIVATE_TO_STATS(adapter) \
-	(&((struct mqnic_adapter *)adapter)->stats)
-
-#define MQNIC_DEV_PRIVATE_TO_INTR(adapter) \
-	(&((struct mqnic_adapter *)adapter)->intr)
-
-#define MQNIC_DEV_PRIVATE_TO_VFTA(adapter) \
-	(&((struct mqnic_adapter *)adapter)->shadow_vfta)
-
-#define MQNIC_DEV_PRIVATE_TO_P_VFDATA(adapter) \
-        (&((struct mqnic_adapter *)adapter)->vfdata)
-
-#define MQNIC_DEV_PRIVATE_TO_FILTER_INFO(adapter) \
-	(&((struct mqnic_adapter *)adapter)->filter)
 
 
 struct mqnic_reg_block {
@@ -865,7 +850,6 @@ void mqnic_single_port_destroy(struct mqnic_port *port);
  * Completion queue manipulations
  */
 void mqnic_arm_cq(struct mqnic_cq_ring *ring);
-void mqnic_cpl_queue_release(struct mqnic_cq_ring *ring);
 
 
 /*
@@ -920,37 +904,17 @@ uint16_t eth_mqnic_recv_pkts(void *rxq, struct rte_mbuf **rx_pkts, uint16_t nb_p
 uint16_t eth_mqnic_recv_scattered_pkts(void *rxq,
 		struct rte_mbuf **rx_pkts, uint16_t nb_pkts);
 
-int eth_mqnic_rss_hash_update(struct rte_eth_dev *dev, struct rte_eth_rss_conf *rss_conf);
-int eth_mqnic_rss_hash_conf_get(struct rte_eth_dev *dev, struct rte_eth_rss_conf *rss_conf);
-int eth_mqnicvf_rx_init(struct rte_eth_dev *dev);
-void eth_mqnicvf_tx_init(struct rte_eth_dev *dev);
+void mqnic_rxq_info_get(struct rte_eth_dev *dev, uint16_t queue_id, struct rte_eth_rxq_info *qinfo);
+void mqnic_txq_info_get(struct rte_eth_dev *dev, uint16_t queue_id, struct rte_eth_txq_info *qinfo);
+
 
 /*
  * misc function prototypes
  */
-void mqnic_pf_host_init(struct rte_eth_dev *eth_dev);
-
-void mqnic_pf_mbx_process(struct rte_eth_dev *eth_dev);
-
-int mqnic_pf_host_configure(struct rte_eth_dev *eth_dev);
-
-void mqnic_rxq_info_get(struct rte_eth_dev *dev, uint16_t queue_id,
-	struct rte_eth_rxq_info *qinfo);
-
-void mqnic_txq_info_get(struct rte_eth_dev *dev, uint16_t queue_id,
-	struct rte_eth_txq_info *qinfo);
-
+int eth_mqnic_rss_hash_update(struct rte_eth_dev *dev, struct rte_eth_rss_conf *rss_conf);
+int eth_mqnic_rss_hash_conf_get(struct rte_eth_dev *dev, struct rte_eth_rss_conf *rss_conf);
 int32_t mqnic_get_basic_info_from_hw(struct mqnic_hw *hw);
 void mqnic_identify_hardware(struct rte_eth_dev *dev, struct rte_pci_device *pci_dev);
 s32 mqnic_read_mac_addr(struct mqnic_hw *hw);
-
-void mqnic_pf_host_uninit(struct rte_eth_dev *dev);
-void mqnic_filterlist_flush(struct rte_eth_dev *dev);
-
-struct mqnic_frag {
-    uint64_t dma_addr;
-    uint32_t len;
-};
-
 
 #endif /* _MQNIC_ETHDEV_H_ */

@@ -343,6 +343,15 @@ mqnic_all_event_queue_active(struct rte_eth_dev *dev)
 }
 
 
+static void
+mqnic_cpl_queue_release(struct mqnic_cq_ring *ring)
+{
+	if (ring != NULL) {
+		rte_free(ring);
+	}
+}
+
+
 static void _create_cpl_queue(struct mqnic_cq_ring *ring, struct mqnic_if *interface, int i, bool is_tx) {
 	ring->interface = interface;
 	ring->index = i;
@@ -390,10 +399,12 @@ static int _alloc_cpl_queue(struct mqnic_cq_ring *ring, struct rte_eth_dev *dev,
 	return 0;
 }
 
+
 void mqnic_arm_cq(struct mqnic_cq_ring *ring)
 {
 	MQNIC_DIRECT_WRITE_REG(ring->hw_addr, MQNIC_CPL_QUEUE_INTERRUPT_INDEX_REG, ring->eq_index | MQNIC_CPL_QUEUE_ARM_MASK);
 }
+
 
 static void mqnic_active_cpl_queue_registers(struct mqnic_cq_ring *ring)
 {
